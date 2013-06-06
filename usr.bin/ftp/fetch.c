@@ -64,7 +64,6 @@ __RCSID("$NetBSD: fetch.c,v 1.206 2014/10/26 16:21:59 christos Exp $");
 #include <unistd.h>
 #include <time.h>
 
-#include "ssl.h"
 #include "ftp_var.h"
 #include "version.h"
 
@@ -75,6 +74,10 @@ typedef enum {
 	HTTPS_URL_T,
 #endif
 	FTP_URL_T,
+#ifdef WITH_SSL
+	FTPS_URL_T,
+	FTPES_URL_T,
+#endif
 	FILE_URL_T,
 	CLASSIC_URL_T
 } url_t;
@@ -106,14 +109,18 @@ static int	redirect_loop;
 #define	FTP_URL		"ftp://"	/* ftp URL prefix */
 #define	HTTP_URL	"http://"	/* http URL prefix */
 #ifdef WITH_SSL
+#define	FTPS_URL	"ftps://"	/* ftps URL prefix */
+#define	FTPES_URL	"ftpes://"	/* ftpes URL prefix */
 #define	HTTPS_URL	"https://"	/* https URL prefix */
 
-#define	IS_HTTP_TYPE(urltype) \
-	(((urltype) == HTTP_URL_T) || ((urltype) == HTTPS_URL_T))
-#else
-#define	IS_HTTP_TYPE(urltype) \
-	((urltype) == HTTP_URL_T)
-#endif
+#define	IS_FTP_TYPE(t) \
+	(((t) == FTP_URL_T) || ((t) == FTPS_URL_T) || ((t) == FTPES_URL_T))
+#define	IS_HTTP_TYPE(t) \
+	(((t) == HTTP_URL_T) || ((t) == HTTPS_URL_T))
+#else	/* !WITH_SSL */
+#define	IS_FTP_TYPE(t)	((t) == FTP_URL_T)
+#define	IS_HTTP_TYPE(t)	((t) == HTTP_URL_T)
+#endif	/* WITH_SSL */
 
 /*
  * Determine if token is the next word in buf (case insensitive).
@@ -365,6 +372,20 @@ parse_url(const char *url, const char *desc, url_t *utype,
 		*utype = HTTPS_URL_T;
 		*portnum = HTTPS_PORT;
 		tport = httpsport;
+	} else if (STRNEQUAL(url, FTPS_URL)) {
+		url += sizeof(FTPS_URL) - 1;
+		*utype = FTPS_URL_T;
+		*portnum = FTPS_PORT;
+		tport = ftpsport;
+		ftpssl = 1;
+		ftps_explicit = 0;
+	} else if (STRNEQUAL(url, FTPES_URL)) {
+		url += sizeof(FTPES_URL) - 1;
+		*utype = FTPES_URL_T;
+		*portnum = FTPS_PORT;
+		tport = ftpsport;
+		ftpssl = 1;
+		ftps_explicit = 1;
 #endif
 	} else {
 		warnx("Invalid %s `%s'", desc, url);
@@ -390,14 +411,14 @@ parse_url(const char *url, const char *desc, url_t *utype,
 		len = ep - url;
 		thost = (char *)ftp_malloc(len + 1);
 		(void)strlcpy(thost, url, len + 1);
-		if (*utype == FTP_URL_T)	/* skip first / for ftp URLs */
+		if (IS_FTP_TYPE(*utype))	/* skip first / for ftp URLs */
 			ep++;
 		*path = ftp_strdup(ep);
 	}
 
 	cp = strchr(thost, '@');	/* look for user[:pass]@ in URLs */
 	if (cp != NULL) {
-		if (*utype == FTP_URL_T)
+		if (IS_FTP_TYPE(*utype))
 			anonftp = 0;	/* disable anonftp */
 		*uuser = thost;
 		*cp = '\0';
@@ -464,7 +485,7 @@ parse_url(const char *url, const char *desc, url_t *utype,
 		*port = ftp_strdup(tport);
 	if (*path == NULL) {
 		const char *emptypath = "/";
-		if (*utype == FTP_URL_T)	/* skip first / for ftp URLs */
+		if (IS_FTP_TYPE(*utype))	/* skip first / for ftp URLs */
 			emptypath++;
 		*path = ftp_strdup(emptypath);
 	}
@@ -542,6 +563,9 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	ischunked = isproxy = hcode = 0;
 	rval = 1;
 	uuser = pass = host = path = decodedpath = puser = ppass = NULL;
+#ifdef WITH_SSL
+	ssl = NULL;
+#endif
 
 	if (sigsetjmp(httpabort, 1))
 		goto cleanup_fetch_url;
@@ -557,7 +581,7 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	}
 
 	if (EMPTYSTRING(path)) {
-		if (urltype == FTP_URL_T) {
+		if (IS_FTP_TYPE(urltype)) {
 			rval = fetch_ftp(url);
 			goto cleanup_fetch_url;
 		}
@@ -581,7 +605,7 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	}
 	DPRINTF("%s: savefile `%s'\n", __func__, savefile);
 	if (EMPTYSTRING(savefile)) {
-		if (urltype == FTP_URL_T) {
+		if (IS_FTP_TYPE(urltype)) {
 			rval = fetch_ftp(url);
 			goto cleanup_fetch_url;
 		}
@@ -635,10 +659,10 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 			if (urltype == HTTPS_URL_T)
 				penv = getoptionvalue("https_proxy");
 #endif
-			if (penv == NULL && IS_HTTP_TYPE(urltype))
-				penv = getoptionvalue("http_proxy");
-			else if (urltype == FTP_URL_T)
-				penv = getoptionvalue("ftp_proxy");
+			if (proxyenv == NULL && IS_HTTP_TYPE(urltype))
+				proxyenv = getoptionvalue("http_proxy");
+			else if (IS_FTP_TYPE(urltype))
+				proxyenv = getoptionvalue("ftp_proxy");
 		}
 		direction = "retrieved";
 		if (! EMPTYSTRING(penv)) {			/* use proxy */
@@ -679,7 +703,7 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 					}
 				}
 				FREEPTR(np_copy);
-				if (isproxy == 0 && urltype == FTP_URL_T) {
+				if (isproxy == 0 && IS_FTP_TYPE(urltype)) {
 					rval = fetch_ftp(url);
 					goto cleanup_fetch_url;
 				}
@@ -697,7 +721,7 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 					goto cleanup_fetch_url;
 
 				if ((!IS_HTTP_TYPE(purltype)
-				     && purltype != FTP_URL_T) ||
+				     && !IS_FTP_TYPE(purltype)) ||
 				    EMPTYSTRING(phost) ||
 				    (! EMPTYSTRING(ppath)
 				     && strcmp(ppath, "/") != 0)) {
@@ -745,9 +769,6 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 			host = res0->ai_canonname;
 
 		s = -1;
-#ifdef WITH_SSL
-		ssl = NULL;
-#endif
 		for (res = res0; res; res = res->ai_next) {
 			char	hname[NI_MAXHOST], sname[NI_MAXSERV];
 
@@ -802,8 +823,15 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 		oldalrm = xsignal(SIGALRM, timeouthttp);
 		alarmtimer(quit_time ? quit_time : 60);
 		fin = fetch_fdopen(s, "r+");
+		if (fin == NULL) {
+			warnx("fdopen failed");
+			goto cleanup_fetch_url;
+		}
+#ifdef WITH_SSL
 		fetch_set_ssl(fin, ssl);
 		alarmtimer(0);
+		ssl = NULL;
+#endif
 
 		alarmtimer(quit_time ? quit_time : 60);
 		/*
@@ -1280,7 +1308,7 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 			while (bufrem > 0) {
 				flen = fetch_read(xferbuf, sizeof(char),
 				    MIN((off_t)bufsize, bufrem), fin);
-				if (flen <= 0)
+				if (flen == 0)
 					goto chunkdone;
 				bytes += flen;
 				bufrem -= flen;
@@ -1378,6 +1406,10 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 		(void)xsignal(SIGALRM, oldalrm);
 	if (oldquit)
 		(void)xsignal(SIGQUIT, oldpipe);
+#ifdef WITH_SSL
+	if (ssl != NULL)
+		fetch_stop_ssl(ssl);
+#endif
 	if (fin != NULL)
 		fetch_close(fin);
 	else if (s != -1)
@@ -1466,7 +1498,12 @@ fetch_ftp(const char *url)
 	rval = 1;
 	transtype = TYPE_I;
 
-	if (STRNEQUAL(url, FTP_URL)) {
+	if (STRNEQUAL(url, FTP_URL)
+#ifdef WITH_SSL
+	    || STRNEQUAL(url, FTPS_URL)
+	    || STRNEQUAL(url, FTPES_URL)
+#endif
+	   ) {
 		if ((parse_url(url, "URL", &urltype, &uuser, &pass,
 		    &host, &port, &portnum, &path) == -1) ||
 		    (uuser != NULL && *uuser == '\0') ||
@@ -1554,7 +1591,7 @@ fetch_ftp(const char *url)
 		}
 	} else
 		dir = NULL;
-	if (urltype == FTP_URL_T && file != NULL) {
+	if (IS_FTP_TYPE(urltype) && file != NULL) {
 		url_decode(file);
 		/* but still don't url_decode(dir) */
 	}
@@ -1680,7 +1717,7 @@ fetch_ftp(const char *url)
 		 * Note that we don't need `dir' after this point.
 		 */
 		do {
-			if (urltype == FTP_URL_T) {
+			if (IS_FTP_TYPE(urltype)) {
 				nextpart = strchr(dir, '/');
 				if (nextpart) {
 					*nextpart = '\0';
@@ -1691,7 +1728,7 @@ fetch_ftp(const char *url)
 				nextpart = NULL;
 			DPRINTF("fetch_ftp: dir `%s', nextpart `%s'\n",
 			    STRorNULL(dir), STRorNULL(nextpart));
-			if (urltype == FTP_URL_T || *dir != '\0') {
+			if (IS_FTP_TYPE(urltype) || *dir != '\0') {
 				(void)strlcpy(cmdbuf, "cd", sizeof(cmdbuf));
 				xargv[0] = cmdbuf;
 				xargv[1] = dir;
@@ -1848,7 +1885,11 @@ go_fetch(const char *url)
 	 * part before the colon is a host name, not an URL scheme,
 	 * so we don't try to match that here.
 	 */
-	if ((p = strstr(url, "://")) != NULL && ! STRNEQUAL(url, FTP_URL))
+	if ((p = strstr(url, "://")) != NULL && ! STRNEQUAL(url, FTP_URL)
+#ifdef WITH_SSL
+	    && ! STRNEQUAL(url, FTPS_URL) && ! STRNEQUAL(url, FTPES_URL)
+#endif
+	   )
 		errx(1, "Unsupported URL scheme `%.*s'", (int)(p - url), url);
 
 	/*
@@ -1857,7 +1898,11 @@ go_fetch(const char *url)
 	 * Othewise, use fetch_ftp().
 	 */
 	proxyenv = getoptionvalue("ftp_proxy");
-	if (!EMPTYSTRING(proxyenv) && STRNEQUAL(url, FTP_URL))
+	if (!EMPTYSTRING(proxyenv) && (STRNEQUAL(url, FTP_URL)
+#ifdef WITH_SSL
+	    || STRNEQUAL(url, FTPS_URL) || STRNEQUAL(url, FTPES_URL)
+#endif
+	    ))
 		return (fetch_url(url, NULL, NULL, NULL));
 
 	return (fetch_ftp(url));

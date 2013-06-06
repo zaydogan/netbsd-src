@@ -89,11 +89,13 @@
  * SUCH DAMAGE.
  */
 
+#include "ssl.h"
+
 struct sockaddr;
 struct tm;
 struct addrinfo;
 
-void	abort_remote(FILE *);
+void	abort_remote(FETCH *);
 void	account(int, char **);
 void	ai_unmapped(struct addrinfo *);
 int	another(int *, char ***, const char *);
@@ -114,7 +116,7 @@ unsigned char complete(EditLine *, int);
 void	controlediting(void);
 #endif /* !NO_EDITCOMPLETE */
 void	crankrate(int);
-FILE   *dataconn(const char *);
+FETCH   *dataconn(const char *);
 void	delete(int, char **);
 void	disconnect(int, char **);
 void	do_chmod(int, char **);
