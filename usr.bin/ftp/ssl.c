@@ -771,8 +771,10 @@ fetch_set_ssl(struct fetch_connect *conn, void *ssl)
 {
 	struct fetch_ssl *fssl = (struct fetch_ssl *)ssl;
 
-	fssl->refcnt++;
-	conn->ssl = fssl;
+	if (fssl != NULL) {
+		fssl->refcnt++;
+		conn->ssl = fssl;
+	}
 }
 
 void

@@ -828,9 +828,11 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 			goto cleanup_fetch_url;
 		}
 #ifdef WITH_SSL
-		fetch_set_ssl(fin, ssl);
+		if (urltype == HTTPS_URL_T) {
+			fetch_set_ssl(fin, ssl);
+			ssl = NULL;
+		}
 		alarmtimer(0);
-		ssl = NULL;
 #endif
 
 		alarmtimer(quit_time ? quit_time : 60);
