@@ -80,7 +80,7 @@ void fetch_stop_ssl(struct fetch_ssl *);
 #define	fetch_getline		get_line
 #define	fetch_getc		getc
 #define	fetch_putc		putc
-#define	fetch_send(f,m,l,f)	send(fileno((f)),(m),(l),(f))
+#define	fetch_send(f,m,l,fl)	send(fileno((f)),(m),(l),(fl))
 
 #endif	/* WITH_SSL */
 
