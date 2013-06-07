@@ -686,6 +686,19 @@ fetch_putc(int c, struct fetch_connect *conn)
 	return c;
 }
 
+ssize_t
+fetch_send(struct fetch_connect *conn, const void *msg, size_t len, int flags)
+{
+	struct iovec iov[1];
+
+	if (conn->ssl == NULL)
+		return send(fetch_fileno(conn), msg, len, flags);
+
+	iov[0].iov_base = __UNCONST(msg);
+	iov[0].iov_len = len;
+	return fetch_writev(conn, iov, 1);
+}
+
 struct fetch_ssl *
 fetch_start_ssl(int sock)
 {

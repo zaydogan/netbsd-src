@@ -55,6 +55,7 @@ char *fetch_getln(char *, int, struct fetch_connect *);
 int fetch_getline(struct fetch_connect *, char *, size_t, const char **);
 int fetch_getc(struct fetch_connect *);
 int fetch_putc(int, struct fetch_connect *);
+ssize_t fetch_send(struct fetch_connect *, const void *, size_t, int);
 void fetch_set_ssl(struct fetch_connect *, struct fetch_ssl *);
 void fetch_free_ssl(struct fetch_connect *);
 struct fetch_ssl *fetch_start_ssl(int);
@@ -64,21 +65,22 @@ void fetch_stop_ssl(struct fetch_ssl *);
 
 #define FETCH FILE
 
-#define	fetch_printf	fprintf
-#define	fetch_vprintf	vfprintf
-#define	fetch_fileno	fileno
-#define	fetch_error	ferror
-#define	fetch_eof	feof
-#define	fetch_flush	fflush
-#define	fetch_open	fopen
-#define	fetch_fdopen	fdopen
-#define	fetch_close	fclose
-#define	fetch_write	fwrite
-#define	fetch_read	fread
-#define	fetch_getln	fgets
-#define	fetch_getline	get_line
-#define	fetch_getc	getc
-#define	fetch_putc	putc
+#define	fetch_printf		fprintf
+#define	fetch_vprintf		vfprintf
+#define	fetch_fileno		fileno
+#define	fetch_error		ferror
+#define	fetch_eof		feof
+#define	fetch_flush		fflush
+#define	fetch_open		fopen
+#define	fetch_fdopen		fdopen
+#define	fetch_close		fclose
+#define	fetch_write		fwrite
+#define	fetch_read		fread
+#define	fetch_getln		fgets
+#define	fetch_getline		get_line
+#define	fetch_getc		getc
+#define	fetch_putc		putc
+#define	fetch_send(f,m,l,f)	send(fileno((f)),(m),(l),(f))
 
 #endif	/* WITH_SSL */
 

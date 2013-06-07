@@ -2167,7 +2167,7 @@ abort_remote(FETCH *din)
 	buf[0] = IAC;
 	buf[1] = IP;
 	buf[2] = IAC;
-	if (send(fetch_fileno(cout), buf, 3, MSG_OOB) != 3)
+	if (fetch_send(cout, buf, 3, MSG_OOB) != 3)
 		warn("Can't send abort message");
 	fetch_printf(cout, "%cABOR\r\n", DM);
 	(void)fetch_flush(cout);
