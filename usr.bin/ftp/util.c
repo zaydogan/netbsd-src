@@ -391,7 +391,7 @@ ftp_login(const char *host, const char *luser, const char *lpass)
 	int n, aflag, rval, nlen;
 #ifdef WITH_SSL
 	static const char *sslprot[] = { "TLS", "SSL" };
-	void *ssl;
+	struct fetch_ssl *ssl;
 	size_t i;
 #endif
 

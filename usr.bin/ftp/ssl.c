@@ -686,7 +686,7 @@ fetch_putc(int c, struct fetch_connect *conn)
 	return c;
 }
 
-void *
+struct fetch_ssl *
 fetch_start_ssl(int sock)
 {
 	struct fetch_ssl *fssl;
@@ -755,24 +755,22 @@ fetch_start_ssl(int sock)
 }
 
 void
-fetch_stop_ssl(void *ssl)
+fetch_stop_ssl(struct fetch_ssl *ssl)
 {
-	struct fetch_ssl *fssl = (struct fetch_ssl *)ssl;
 
-	if (fssl != NULL) {
-		SSL_free(fssl->ssl);
-		free(fssl);
+	if (ssl != NULL) {
+		SSL_free(ssl->ssl);
+		free(ssl);
 	}
 }
 
 void
-fetch_set_ssl(struct fetch_connect *conn, void *ssl)
+fetch_set_ssl(struct fetch_connect *conn, struct fetch_ssl *ssl)
 {
-	struct fetch_ssl *fssl = (struct fetch_ssl *)ssl;
 
-	if (fssl != NULL) {
-		fssl->refcnt++;
-		conn->ssl = fssl;
+	if (ssl != NULL) {
+		ssl->refcnt++;
+		conn->ssl = ssl;
 	}
 }
 

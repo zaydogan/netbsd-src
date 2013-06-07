@@ -548,7 +548,7 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	url_t			urltype;
 	in_port_t		portnum;
 #ifdef WITH_SSL
-	void			*ssl;
+	struct fetch_ssl	*volatile ssl;
 #endif
 
 	DPRINTF("%s: `%s' proxyenv `%s'\n", __func__, url, STRorNULL(penv));

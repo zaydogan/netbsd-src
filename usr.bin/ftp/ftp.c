@@ -165,7 +165,7 @@ hookup(const char *host, const char *port)
 	socklen_t len;
 	int on = 1;
 #ifdef WITH_SSL
-	void *ssl = NULL;
+	struct fetch_ssl *ssl = NULL;
 #endif
 
 	memset((char *)&hisctladdr, 0, sizeof (hisctladdr));
@@ -281,7 +281,7 @@ hookup(const char *host, const char *port)
 		goto bad;
 	}
 #ifdef WITH_SSL
-	if (ftpssl && !ftps_explicit && ssl != NULL) {
+	if (ftpssl && !ftps_explicit) {
 		fetch_set_ssl(cin, ssl);
 		fetch_set_ssl(cout, ssl);
 		ssl = NULL;
@@ -1732,7 +1732,7 @@ dataconn(const char *lmode)
 	socklen_t	fromlen;
 	FETCH		*conn;
 #ifdef WITH_SSL
-	void		*ssl;
+	struct fetch_ssl *ssl;
 #endif
 
 	if (passivemode)	/* passive data connection */

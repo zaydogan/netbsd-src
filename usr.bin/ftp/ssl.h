@@ -35,6 +35,7 @@
 
 #define FETCH struct fetch_connect
 struct fetch_connect;
+struct fetch_ssl;
 
 int fetch_printf(struct fetch_connect *, const char *fmt, ...)
     __printflike(2, 3);
@@ -54,10 +55,10 @@ char *fetch_getln(char *, int, struct fetch_connect *);
 int fetch_getline(struct fetch_connect *, char *, size_t, const char **);
 int fetch_getc(struct fetch_connect *);
 int fetch_putc(int, struct fetch_connect *);
-void fetch_set_ssl(struct fetch_connect *, void *);
+void fetch_set_ssl(struct fetch_connect *, struct fetch_ssl *);
 void fetch_free_ssl(struct fetch_connect *);
-void *fetch_start_ssl(int);
-void fetch_stop_ssl(void *);
+struct fetch_ssl *fetch_start_ssl(int);
+void fetch_stop_ssl(struct fetch_ssl *);
 
 #else	/* !WITH_SSL */
 
