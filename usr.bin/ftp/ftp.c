@@ -1730,7 +1730,7 @@ dataconn(const char *lmode)
 	struct timeval	endtime, now, td;
 	struct pollfd	pfd[1];
 	socklen_t	fromlen;
-	FETCH		*dataconn;
+	FETCH		*conn;
 #ifdef WITH_SSL
 	void		*ssl;
 #endif
@@ -1796,6 +1796,7 @@ dataconn(const char *lmode)
 #endif
  dataconn_open:
 #ifdef WITH_SSL
+	ssl = NULL;
 	if (ftpssl) {
 		if ((ssl = fetch_start_ssl(data)) == NULL) {
 			warn("SSL negotiation failed on data connection");
@@ -1803,17 +1804,17 @@ dataconn(const char *lmode)
 		}
 	}
 #endif
-	dataconn = fetch_fdopen(data, lmode);
+	conn = fetch_fdopen(data, lmode);
 #ifdef WITH_SSL
 	if (ftpssl) {
-		if (dataconn == NULL) {
+		if (conn == NULL) {
 			fetch_stop_ssl(ssl);
 			goto dataconn_failed;
 		}
-		fetch_set_ssl(dataconn, ssl);
+		fetch_set_ssl(conn, ssl);
 	}
 #endif
-	return dataconn;
+	return conn;
 
  dataconn_failed:
 	(void)close(data);

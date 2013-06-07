@@ -564,7 +564,6 @@ char *
 fetch_getln(char *str, int size, struct fetch_connect *conn)
 {
 	size_t tmpsize;
-	ssize_t len;
 	int c;
 
 	if (conn->buf == NULL) {

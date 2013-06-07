@@ -563,9 +563,6 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	ischunked = isproxy = hcode = 0;
 	rval = 1;
 	uuser = pass = host = path = decodedpath = puser = ppass = NULL;
-#ifdef WITH_SSL
-	ssl = NULL;
-#endif
 
 	if (sigsetjmp(httpabort, 1))
 		goto cleanup_fetch_url;
@@ -769,6 +766,9 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 			host = res0->ai_canonname;
 
 		s = -1;
+#ifdef WITH_SSL
+		ssl = NULL;
+#endif
 		for (res = res0; res; res = res->ai_next) {
 			char	hname[NI_MAXHOST], sname[NI_MAXSERV];
 
@@ -817,6 +817,9 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 
 		if (s < 0) {
 			warnx("Can't connect to `%s:%s'", host, port);
+#ifdef WITH_SSL
+			fetch_stop_ssl(ssl);
+#endif
 			goto cleanup_fetch_url;
 		}
 
@@ -825,6 +828,9 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 		fin = fetch_fdopen(s, "r+");
 		if (fin == NULL) {
 			warnx("fdopen failed");
+#ifdef WITH_SSL
+			fetch_stop_ssl(ssl);
+#endif
 			goto cleanup_fetch_url;
 		}
 #ifdef WITH_SSL
