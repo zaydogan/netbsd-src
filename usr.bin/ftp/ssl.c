@@ -365,19 +365,6 @@ fetch_close(struct fetch_connect *conn)
 	return rv;
 }
 
-void
-fetch_sfree(struct fetch_connect *conn)
-{
-
-	if (conn != NULL) {
-		fetch_flush(conn);
-		fetch_free_ssl(conn);
-		free(conn->cache.buf);
-		free(conn->buf);
-		free(conn);
-	}
-}
-
 #define FETCH_READ_INTR		-4
 #define FETCH_READ_WAIT		-3
 #define FETCH_READ_ERROR	-2

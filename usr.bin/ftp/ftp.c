@@ -705,6 +705,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 	int oprogress;
 #ifdef WITH_SSL
 	FETCH *volatile fin2;
+	int fdin;
 #endif
 
 	hashbytes = mark;
@@ -823,13 +824,17 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 	case TYPE_I:
 	case TYPE_L:
 #ifdef WITH_SSL
-		fin2 = fetch_fdopen(fileno(fin), "r");
-		if (fin2 != NULL) {
-			c = copy_bytes(fin2, dout, buf, bufsize, rate_put,
-			    hash_interval);
-			fetch_sfree(fin2);
-		} else
-			c = 1;
+		c = 1;
+		fdin = dup(fileno(fin));
+		if (fdin >= 0) {
+			fin2 = fetch_fdopen(fdin, "r");
+			if (fin2 != NULL) {
+				c = copy_bytes(fin2, dout, buf, bufsize,
+				    rate_put, hash_interval);
+				fetch_close(fin2);
+			} else
+				close(fdin);
+		}
 #else /* !WITH_SSL */
 		c = copy_bytes(fin, dout, buf, bufsize, rate_put,
 		    hash_interval);
@@ -953,8 +958,9 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 	int oprogress;
 	int opreserve;
 #ifdef WITH_SSL
-	FETCH *volatile fout2;
 	const char *fmode;
+	FETCH *volatile fout2;
+	int fdout;
 #endif
 
 	fout = NULL;
@@ -1112,13 +1118,17 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 			goto cleanuprecv;
 		}
 #ifdef WITH_SSL
-		fout2 = fetch_fdopen(fileno(fout), fmode);
-		if (fout2 != NULL) {
-			c = copy_bytes(din, fout2, buf, bufsize, rate_get,
-			    hash_interval);
-			fetch_sfree(fout2);
-		} else
-			c = 2;
+		c = 2;
+		fdout = dup(fileno(fout));
+		if (fdout >= 0) {
+			fout2 = fetch_fdopen(fdout, fmode);
+			if (fout2 != NULL) {
+				c = copy_bytes(din, fout2, buf, bufsize,
+				    rate_get, hash_interval);
+				fetch_close(fout2);
+			} else
+				close(fdout);
+		}
 #else /* !WITH_SSL */
 		c = copy_bytes(din, fout, buf, bufsize, rate_get,
 		    hash_interval);

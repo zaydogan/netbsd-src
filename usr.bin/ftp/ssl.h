@@ -48,7 +48,6 @@ int fetch_flush(struct fetch_connect *);
 struct fetch_connect *fetch_open(const char *, const char *);
 struct fetch_connect *fetch_fdopen(int, const char *);
 int fetch_close(struct fetch_connect *);
-void fetch_sfree(struct fetch_connect *);
 size_t fetch_write(void *, size_t, size_t, struct fetch_connect *);
 size_t fetch_read(void *, size_t, size_t, struct fetch_connect *);
 char *fetch_getln(char *, int, struct fetch_connect *);
