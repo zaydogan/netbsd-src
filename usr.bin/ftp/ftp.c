@@ -937,7 +937,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 
 void
 recvrequest(const char *cmd, const char *volatile local, const char *remote,
-	    const char *lmode, int printnames, int ignorespecial)
+	    const char *volatile lmode, int printnames, int ignorespecial)
 {
 	FILE *volatile fout;
 	FETCH *volatile din;
