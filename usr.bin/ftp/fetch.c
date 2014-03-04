@@ -828,6 +828,7 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 		fin = fetch_fdopen(s, "r+");
 		if (fin == NULL) {
 			warnx("fdopen failed");
+			alarmtimer(0);
 #ifdef WITH_SSL
 			fetch_stop_ssl(ssl);
 #endif
