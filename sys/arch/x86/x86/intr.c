@@ -426,13 +426,17 @@ intr_allocate_slot_cpu(struct cpu_info *ci, struct pic *pic, int pin,
 		KASSERT(CPU_IS_PRIMARY(ci));
 		slot = pin;
 	} else {
+		int start = 0;
 		slot = -1;
+
+		if (CPU_IS_PRIMARY(ci) && pic->pic_type == PIC_MSI)
+			start = NUM_LEGACY_IRQS;
 
 		/*
 		 * intr_allocate_slot has checked for an existing mapping.
 		 * Now look for a free slot.
 		 */
-		for (i = 0; i < MAX_INTR_SOURCES ; i++) {
+		for (i = start; i < MAX_INTR_SOURCES ; i++) {
 			if (ci->ci_isources[i] == NULL) {
 				slot = i;
 				break;
@@ -449,8 +453,13 @@ intr_allocate_slot_cpu(struct cpu_info *ci, struct pic *pic, int pin,
 		if (isp == NULL) {
 			return ENOMEM;
 		}
-		snprintf(isp->is_evname, sizeof (isp->is_evname),
-		    "pin %d", pin);
+		if (pic->pic_type == PIC_MSI) {
+			snprintf(isp->is_evname, sizeof (isp->is_evname),
+			    "devid %d", pin);
+		} else {
+			snprintf(isp->is_evname, sizeof (isp->is_evname),
+			    "pin %d", pin);
+		}
 		evcnt_attach_dynamic(&isp->is_evcnt, EVCNT_TYPE_INTR, NULL,
 		    pic->pic_name, isp->is_evname);
 		ci->ci_isources[slot] = isp;

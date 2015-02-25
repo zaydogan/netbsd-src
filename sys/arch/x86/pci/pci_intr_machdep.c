@@ -112,6 +112,16 @@ __KERNEL_RCSID(0, "$NetBSD: pci_intr_machdep.c,v 1.27 2014/03/29 19:28:30 christ
 
 #define	MPSAFE_MASK	0x80000000
 
+#if NIOAPIC > 0
+#define	MSI_MASK	0x20000000
+
+static void *msi_establish(pci_chipset_tag_t, pci_intr_handle_t, int,
+    int (*)(void *), void *);
+static void msi_disestablish(void *);
+
+static uint8_t msi_count;
+#endif
+
 int
 pci_intr_map(const struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
@@ -122,12 +132,21 @@ pci_intr_map(const struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 	int rawpin = pa->pa_rawintrpin;
 	int bus, dev, func;
 #endif
-
 	for (ipc = pc; ipc != NULL; ipc = ipc->pc_super) {
 		if ((ipc->pc_present & PCI_OVERRIDE_INTR_MAP) == 0)
 			continue;
 		return (*ipc->pc_ov->ov_intr_map)(ipc->pc_ctx, pa, ihp);
 	}
+
+#if NIOAPIC > 0
+	if (mp_busses != NULL &&
+	    pci_get_capability(pc, pa->pa_tag, PCI_CAP_MSI, NULL, NULL)) {
+		*ihp = pa->pa_tag.mode1 | MSI_MASK;
+		*ihp &= ~0x80000000U; /* XXX PCI_MODE1_ENABLE vs MPSAFE_MASK */
+		*ihp |= msi_count++;
+		return 0;
+	}
+#endif
 
 	if (pin == 0) {
 		/* No IRQ used. */
@@ -232,6 +251,13 @@ pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih, char *buf,
 		    buf, len);
 	}
 
+#if NIOAPIC > 0
+	if (ih & MSI_MASK) {
+		snprintf(buf, len, "msi devid %d", ih & 0xff);
+		return buf;
+	}
+#endif
+
 	return intr_string(ih & ~MPSAFE_MASK, buf, len);
 }
 
@@ -270,6 +296,11 @@ pci_intr_setattr(pci_chipset_tag_t pc, pci_intr_handle_t *ih,
 	}
 }
 
+struct pci_hdl {
+	struct intrhand *ih;
+	int type;
+};
+
 void *
 pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih,
     int level, int (*func)(void *), void *arg)
@@ -288,6 +319,11 @@ pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih,
 		return (*ipc->pc_ov->ov_intr_establish)(ipc->pc_ctx,
 		    pc, ih, level, func, arg);
 	}
+
+#if NIOAPIC > 0
+	if (ih & MSI_MASK)
+		return msi_establish(pc, ih, level, func, arg);
+#endif
 
 	pic = &i8259_pic;
 	pin = irq = (ih & ~MPSAFE_MASK);
@@ -309,13 +345,21 @@ pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih,
 	}
 #endif
 
-	return intr_establish(irq, pic, pin, IST_LEVEL, level, func, arg,
-	    mpsafe);
+	struct intrhand *ihand = intr_establish(irq, pic, pin, IST_LEVEL, level,
+	    func, arg, mpsafe);
+	if (ihand == NULL)
+		return NULL;
+
+	struct pci_hdl *pcih = malloc(sizeof(*pcih), M_DEVBUF, M_WAITOK);
+	pcih->ih = ihand;
+	pcih->type = 0;
+	return pcih;
 }
 
 void
 pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 {
+	struct pci_hdl *pcih = cookie;
 	pci_chipset_tag_t ipc;
 
 	for (ipc = pc; ipc != NULL; ipc = ipc->pc_super) {
@@ -325,7 +369,15 @@ pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 		return;
 	}
 
-	intr_disestablish(cookie);
+#if NIOAPIC > 0
+	if (pcih->type == MSI_MASK) {
+		msi_disestablish(cookie);
+		return;
+	}
+#endif
+
+	intr_disestablish(pcih->ih);
+	free(pcih, M_DEVBUF);
 }
 
 #if NIOAPIC > 0
@@ -336,98 +388,119 @@ pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
  * from its kernel support)
  */
 
-/* dummies, needed by common intr_establish code */
+struct msi_pic {
+	struct pic mp_pic;
+	pci_chipset_tag_t mp_pc;
+	pcitag_t mp_tag;
+	int mp_co;
+};
+
 static void
 msipic_hwmask(struct pic *pic, int pin)
 {
 }
+
+static void
+msipic_hwunmask(struct pic *pic, int pin)
+{
+}
+
 static void
 msipic_addroute(struct pic *pic, struct cpu_info *ci,
 		int pin, int vec, int type)
 {
+	struct msi_pic *msipic = (struct msi_pic *)pic;
+	pci_chipset_tag_t pc = msipic->mp_pc;
+	pcitag_t tag = msipic->mp_tag;
+	int co = msipic->mp_co;
+
+	pcireg_t ctl = pci_conf_read(pc, tag, co + PCI_MSI_CTL);
+	pci_conf_write(pc, tag, co + PCI_MSI_MADDR64_LO,
+	    LAPIC_MSIADDR_BASE |
+	    __SHIFTIN(ci->ci_cpuid, LAPIC_MSIADDR_DSTID_MASK));
+	int dataoff = PCI_MSI_MDATA;
+	if (ctl & PCI_MSI_CTL_64BIT_ADDR) {
+		dataoff = PCI_MSI_MDATA64;
+		pci_conf_write(pc, tag, co + PCI_MSI_MADDR64_HI, 0);
+	}
+	pci_conf_write(pc, tag, co + dataoff,
+	    __SHIFTIN(vec, LAPIC_MSIDATA_VECTOR_MASK) |
+	    LAPIC_MSIDATA_TRGMODE_EDGE | LAPIC_MSIDATA_DM_FIXED);
+	ctl |= PCI_MSI_CTL_MSI_ENABLE;
+	pci_conf_write(pc, tag, co + PCI_MSI_CTL, ctl);
+}
+
+static void
+msipic_delroute(struct pic *pic, struct cpu_info *ci,
+		int pin, int vec, int type)
+{
+	struct msi_pic *msipic = (struct msi_pic *)pic;
+	pci_chipset_tag_t pc = msipic->mp_pc;
+	pcitag_t tag = msipic->mp_tag;
+	int co = msipic->mp_co;
+
+	pcireg_t ctl = pci_conf_read(pc, tag, co + PCI_MSI_CTL);
+	ctl &= ~PCI_MSI_CTL_MSI_ENABLE;
+	pci_conf_write(pc, tag, co + PCI_MSI_CTL, ctl);
 }
 
 static struct pic msi_pic = {
 	.pic_name = "msi",
-	.pic_type = PIC_SOFT,
+	.pic_type = PIC_MSI,
 	.pic_vecbase = 0,
 	.pic_apicid = 0,
 	.pic_lock = __SIMPLELOCK_UNLOCKED,
 	.pic_hwmask = msipic_hwmask,
-	.pic_hwunmask = msipic_hwmask,
+	.pic_hwunmask = msipic_hwunmask,
 	.pic_addroute = msipic_addroute,
-	.pic_delroute = msipic_addroute,
+	.pic_delroute = msipic_delroute,
 	.pic_edge_stubs = ioapic_edge_stubs,
 };
 
 struct msi_hdl {
-	struct intrhand *ih;
-	pci_chipset_tag_t pc;
-	pcitag_t tag;
-	int co;
+	struct pci_hdl pci;
+	struct msi_pic *msipic;
 };
 
-void *
-pci_msi_establish(struct pci_attach_args *pa, int level,
-		  int (*func)(void *), void *arg)
+static void *
+msi_establish(pci_chipset_tag_t pc, pci_intr_handle_t pih, int level,
+    int (*func)(void *), void *arg)
 {
-	int co;
-	struct intrhand *ih;
-	struct msi_hdl *msih;
-	struct cpu_info *ci;
-	struct intrsource *is;
-	pcireg_t reg;
+	pcitag_t tag;
+	tag.mode1 = (pih & ~(MSI_MASK|0xff)) | 0x80000000U/*PCI_MODE1_ENABLE*/;
 
-	if (!pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_MSI, &co, 0))
+	int co;
+	pcireg_t ctl;
+	if (!pci_get_capability(pc, tag, PCI_CAP_MSI, &co, &ctl))
 		return NULL;
 
-	ih = intr_establish(-1, &msi_pic, -1, IST_EDGE, level, func, arg, 0);
+	struct msi_pic *msipic = malloc(sizeof(*msipic), M_DEVBUF, M_WAITOK);
+	msipic->mp_pic = msi_pic;
+	msipic->mp_pc = pc;
+	msipic->mp_tag = tag;
+	msipic->mp_co = co;
+
+	struct intrhand *ih = intr_establish(-1, &msipic->mp_pic, pih & 0xff,
+	    IST_EDGE, level, func, arg, (pih & MPSAFE_MASK) != 0);
 	if (ih == NULL)
 		return NULL;
 
-	msih = malloc(sizeof(*msih), M_DEVBUF, M_WAITOK);
-	msih->ih = ih;
-	msih->pc = pa->pa_pc;
-	msih->tag = pa->pa_tag;
-	msih->co = co;
-
-	ci = ih->ih_cpu;
-	is = ci->ci_isources[ih->ih_slot];
-	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, co + PCI_MSI_CTL);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, co + PCI_MSI_MADDR64_LO,
-		       LAPIC_MSIADDR_BASE |
-		       __SHIFTIN(ci->ci_cpuid, LAPIC_MSIADDR_DSTID_MASK));
-	if (reg & PCI_MSI_CTL_64BIT_ADDR) {
-		pci_conf_write(pa->pa_pc, pa->pa_tag, co + PCI_MSI_MADDR64_HI,
-		    0);
-		/* XXX according to the manual, ASSERT is unnecessary if
-		 * EDGE
-		 */
-		pci_conf_write(pa->pa_pc, pa->pa_tag, co + PCI_MSI_MDATA64,
-		    __SHIFTIN(is->is_idtvec, LAPIC_MSIDATA_VECTOR_MASK) |
-		    LAPIC_MSIDATA_TRGMODE_EDGE | LAPIC_MSIDATA_LEVEL_ASSERT |
-		    LAPIC_MSIDATA_DM_FIXED);
-	} else {
-		/* XXX according to the manual, ASSERT is unnecessary if
-		 * EDGE
-		 */
-		pci_conf_write(pa->pa_pc, pa->pa_tag, co + PCI_MSI_MDATA,
-		    __SHIFTIN(is->is_idtvec, LAPIC_MSIDATA_VECTOR_MASK) |
-		    LAPIC_MSIDATA_TRGMODE_EDGE | LAPIC_MSIDATA_LEVEL_ASSERT |
-		    LAPIC_MSIDATA_DM_FIXED);
-	}
-	pci_conf_write(pa->pa_pc, pa->pa_tag, co + PCI_MSI_CTL,
-	    PCI_MSI_CTL_MSI_ENABLE);
+	struct msi_hdl *msih = malloc(sizeof(*msih), M_DEVBUF, M_WAITOK);
+	msih->pci.ih = ih;
+	msih->pci.type = MSI_MASK;
+	msih->msipic = msipic;
 	return msih;
 }
 
-void
-pci_msi_disestablish(void *ih)
+static void
+msi_disestablish(void *ih)
 {
 	struct msi_hdl *msih = ih;
 
-	pci_conf_write(msih->pc, msih->tag, msih->co + PCI_MSI_CTL, 0);
-	intr_disestablish(msih->ih);
+	pci_conf_write(msih->msipic->mp_pc, msih->msipic->mp_tag,
+	    msih->msipic->mp_co + PCI_MSI_CTL, 0);
+	intr_disestablish(msih->pci.ih);
+	free(msih->msipic, M_DEVBUF);
 	free(msih, M_DEVBUF);
 }
 #endif
