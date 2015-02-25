@@ -205,6 +205,37 @@ static bool radeon_read_platform_bios(struct radeon_device *rdev)
  * vbios image on PX systems (all asics).
  * Returns the length of the buffer fetched.
  */
+#ifdef __NetBSD__
+static int radeon_atrm_call(ACPI_HANDLE atrm_handle, uint8_t *bios,
+			    int offset, int len)
+{
+	ACPI_STATUS status;
+	ACPI_OBJECT atrm_arg_elements[2], *obj;
+	ACPI_OBJECT_LIST atrm_arg;
+	ACPI_BUFFER buffer = { ACPI_ALLOCATE_BUFFER, NULL};
+
+	atrm_arg.Count = 2;
+	atrm_arg.Pointer = &atrm_arg_elements[0];
+
+	atrm_arg_elements[0].Type = ACPI_TYPE_INTEGER;
+	atrm_arg_elements[0].Integer.Value = offset;
+
+	atrm_arg_elements[1].Type = ACPI_TYPE_INTEGER;
+	atrm_arg_elements[1].Integer.Value = len;
+
+	status = AcpiEvaluateObject(atrm_handle, NULL, &atrm_arg, &buffer);
+	if (ACPI_FAILURE(status)) {
+		printk("failed to evaluate ATRM got %s\n", AcpiFormatException(status));
+		return -ENODEV;
+	}
+
+	obj = (ACPI_OBJECT *)buffer.Pointer;
+	memcpy(bios+offset, obj->Buffer.Pointer, obj->Buffer.Length);
+	len = obj->Buffer.Length;
+	kfree(buffer.Pointer);
+	return len;
+}
+#else
 static int radeon_atrm_call(acpi_handle atrm_handle, uint8_t *bios,
 			    int offset, int len)
 {
@@ -234,21 +265,38 @@ static int radeon_atrm_call(acpi_handle atrm_handle, uint8_t *bios,
 	kfree(buffer.pointer);
 	return len;
 }
+#endif
 
 static bool radeon_atrm_get_bios(struct radeon_device *rdev)
 {
 	int ret;
 	int size = 256 * 1024;
 	int i;
+#ifdef __NetBSD__
+	ACPI_HANDLE dhandle, atrm_handle;
+	ACPI_STATUS status;
+#else
 	struct pci_dev *pdev = NULL;
 	acpi_handle dhandle, atrm_handle;
 	acpi_status status;
+#endif
 	bool found = false;
 
 	/* ATRM is for the discrete card only */
 	if (rdev->flags & RADEON_IS_IGP)
 		return false;
 
+#ifdef __NetBSD__
+	if (rdev->pdev->pd_ad == NULL)
+		return false;
+	dhandle = rdev->pdev->pd_ad->ad_handle;
+	if (dhandle == NULL)
+		return false;
+
+	status = AcpiGetHandle(dhandle, "ATRM", &atrm_handle);
+	if (!ACPI_FAILURE(status))
+		found = true;
+#else
 	while ((pdev = pci_get_class(PCI_CLASS_DISPLAY_VGA << 8, pdev)) != NULL) {
 		dhandle = ACPI_HANDLE(&pdev->dev);
 		if (!dhandle)
@@ -274,6 +322,7 @@ static bool radeon_atrm_get_bios(struct radeon_device *rdev)
 			}
 		}
 	}
+#endif
 
 	if (!found)
 		return false;
@@ -656,6 +705,55 @@ static bool radeon_read_disabled_bios(struct radeon_device *rdev)
 }
 
 #ifdef CONFIG_ACPI
+#ifdef __NetBSD__
+static bool radeon_acpi_vfct_bios(struct radeon_device *rdev)
+{
+	bool ret = false;
+	struct acpi_table_header *hdr;
+	UEFI_ACPI_VFCT *vfct;
+	GOP_VBIOS_CONTENT *vbios;
+	VFCT_IMAGE_HEADER *vhdr;
+
+	if (!ACPI_SUCCESS(AcpiGetTable("VFCT", 1, &hdr)))
+		return false;
+	if (hdr->Length < sizeof(UEFI_ACPI_VFCT)) {
+		DRM_ERROR("ACPI VFCT table present but broken (too short #1)\n");
+		goto out_unmap;
+	}
+
+	vfct = (UEFI_ACPI_VFCT *)hdr;
+	if (vfct->VBIOSImageOffset + sizeof(VFCT_IMAGE_HEADER) > hdr->Length) {
+		DRM_ERROR("ACPI VFCT table present but broken (too short #2)\n");
+		goto out_unmap;
+	}
+
+	vbios = (GOP_VBIOS_CONTENT *)((char *)hdr + vfct->VBIOSImageOffset);
+	vhdr = &vbios->VbiosHeader;
+	DRM_INFO("ACPI VFCT contains a BIOS for %02x:%02x.%d %04x:%04x, size %d\n",
+			vhdr->PCIBus, vhdr->PCIDevice, vhdr->PCIFunction,
+			vhdr->VendorID, vhdr->DeviceID, vhdr->ImageLength);
+
+	if (vhdr->PCIBus != rdev->pdev->bus->number ||
+	    vhdr->PCIDevice != PCI_SLOT(rdev->pdev->devfn) ||
+	    vhdr->PCIFunction != PCI_FUNC(rdev->pdev->devfn) ||
+	    vhdr->VendorID != rdev->pdev->vendor ||
+	    vhdr->DeviceID != rdev->pdev->device) {
+		DRM_INFO("ACPI VFCT table is not for this card\n");
+		goto out_unmap;
+	};
+
+	if (vfct->VBIOSImageOffset + sizeof(VFCT_IMAGE_HEADER) + vhdr->ImageLength > hdr->Length) {
+		DRM_ERROR("ACPI VFCT image truncated\n");
+		goto out_unmap;
+	}
+
+	rdev->bios = kmemdup(&vbios->VbiosContent, vhdr->ImageLength, GFP_KERNEL);
+	ret = !!rdev->bios;
+
+out_unmap:
+	return ret;
+}
+#else
 static bool radeon_acpi_vfct_bios(struct radeon_device *rdev)
 {
 	bool ret = false;
@@ -704,6 +802,7 @@ static bool radeon_acpi_vfct_bios(struct radeon_device *rdev)
 out_unmap:
 	return ret;
 }
+#endif
 #else
 static inline bool radeon_acpi_vfct_bios(struct radeon_device *rdev)
 {
