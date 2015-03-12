@@ -1,3 +1,5 @@
+/*	$NetBSD: ieee80211_node.h,v 1.25 2014/10/18 08:33:29 snj Exp $	*/
+
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002-2009 Sam Leffler, Errno Consulting
@@ -23,7 +25,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD$
+ * $FreeBSD: src/sys/net80211/ieee80211_node.h,v 1.22 2005/08/10 16:22:29 sam Exp $
  */
 #ifndef _NET80211_IEEE80211_NODE_H_
 #define _NET80211_IEEE80211_NODE_H_

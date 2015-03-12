@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2009 Sam Leffler, Errno Consulting
  * All rights reserved.
@@ -24,7 +26,12 @@
  */
 
 #include <sys/cdefs.h>
+#ifdef __FreeBSD__
 __FBSDID("$FreeBSD$");
+#endif
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD$");
+#endif
 
 /*
  * IEEE 802.11 radiotap support.

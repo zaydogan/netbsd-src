@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2011 Adrian Chadd, Xenion Lty Ltd
  * All rights reserved.

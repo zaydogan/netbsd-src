@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*- 
  * Copyright (c) 2009 The FreeBSD Foundation 
  * All rights reserved. 

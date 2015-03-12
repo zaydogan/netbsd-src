@@ -1,3 +1,5 @@
+/*	$NetBSD: ieee80211_node.c,v 1.68 2014/10/18 08:33:29 snj Exp $	*/
+
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002-2009 Sam Leffler, Errno Consulting
@@ -25,7 +27,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
+#ifdef __FreeBSD__
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_node.c,v 1.65 2005/08/13 17:50:21 sam Exp $");
+#endif
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_node.c,v 1.68 2014/10/18 08:33:29 snj Exp $");
+#endif
 
 #include "opt_wlan.h"
 

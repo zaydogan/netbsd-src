@@ -1,3 +1,5 @@
+/*	$NetBSD: ieee80211_ioctl.c,v 1.59 2014/01/25 00:59:44 christos Exp $	*/
+
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002-2009 Sam Leffler, Errno Consulting
@@ -25,7 +27,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
+#ifdef __FreeBSD__
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_ioctl.c,v 1.35 2005/08/30 14:27:47 avatar Exp $");
+#endif
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_ioctl.c,v 1.59 2014/01/25 00:59:44 christos Exp $");
+#endif
 
 /*
  * IEEE 802.11 ioctl support (FreeBSD-specific)

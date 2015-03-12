@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2007-2009 Sam Leffler, Errno Consulting
  * Copyright (c) 2007-2009 Intel Corporation
@@ -27,6 +29,9 @@
 #include <sys/cdefs.h>
 #ifdef __FreeBSD__
 __FBSDID("$FreeBSD$");
+#endif
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD$");
 #endif
 
 /*

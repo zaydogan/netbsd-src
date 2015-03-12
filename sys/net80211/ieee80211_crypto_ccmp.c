@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2002-2008 Sam Leffler, Errno Consulting
  * All rights reserved.
@@ -24,7 +26,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
+#ifdef __FreeBSD__
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_crypto_ccmp.c,v 1.7 2005/07/11 03:06:23 sam Exp $");
+#endif
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_crypto_ccmp.c,v 1.11 2014/10/18 08:33:29 snj Exp $");
+#endif
 
 /*
  * IEEE 802.11i AES-CCMP crypto support.

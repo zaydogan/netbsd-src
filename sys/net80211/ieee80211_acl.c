@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2004-2008 Sam Leffler, Errno Consulting
  * All rights reserved.
@@ -24,7 +26,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
+#ifdef __FreeBSD__
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_acl.c,v 1.4 2005/08/13 17:31:48 sam Exp $");
+#endif
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_acl.c,v 1.9 2011/06/12 00:07:19 christos Exp $");
+#endif
 
 /*
  * IEEE 802.11 MAC ACL support.

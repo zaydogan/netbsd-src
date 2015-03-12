@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2004 Video54 Technologies, Inc.
  * Copyright (c) 2004-2008 Sam Leffler, Errno Consulting
@@ -25,7 +27,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
+#ifdef __FreeBSD__
+__FBSDID("$src/sys/net80211/ieee80211_xauth.c,v 1.2 2004/12/31 22:42:38 sam Exp $");
+#endif
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_xauth.c,v 1.5 2006/02/27 01:08:28 dyoung Exp $");
+#endif
 
 /*
  * External authenticator placeholder module.

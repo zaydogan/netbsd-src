@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2007-2009 Sam Leffler, Errno Consulting
  * All rights reserved.

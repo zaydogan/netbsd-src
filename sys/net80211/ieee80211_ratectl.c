@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2010 Rui Paulo <rpaulo@FreeBSD.org>
  * All rights reserved.
@@ -24,7 +26,12 @@
  */
 
 #include <sys/cdefs.h>
+#ifdef __FreeBSD__
 __FBSDID("$FreeBSD$");
+#endif
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD$");
+#endif
 
 #include <sys/param.h>
 #include <sys/kernel.h>

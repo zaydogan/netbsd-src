@@ -1,5 +1,4 @@
-/*	$FreeBSD$	*/
-/* $NetBSD: ieee80211_rssadapt.c,v 1.9 2005/02/26 22:45:09 perry Exp $ */
+/* $NetBSD: ieee80211_rssadapt.c,v 1.19 2014/04/07 00:07:40 pooka Exp $ */
 /*-
  * Copyright (c) 2010 Rui Paulo <rpaulo@FreeBSD.org>
  * Copyright (c) 2003, 2004 David Young.  All rights reserved.
@@ -30,6 +29,12 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
  * OF SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+#ifdef __NetBSD__
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_rssadapt.c,v 1.19 2014/04/07 00:07:40 pooka Exp $");
+#endif
+
 #include "opt_wlan.h"
 
 #include <sys/param.h>
