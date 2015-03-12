@@ -1,0 +1,73 @@
+include "arch/amd64/conf/GENERIC"
+
+no an
+no ath
+no athn
+no atw
+no bwi
+no ipw
+no iwi
+#no iwn
+no iwm
+no malo
+no ral
+no rtw
+no wi
+no wpi
+
+no awi
+no cnw
+no ray
+
+no atu
+no otus
+no ural
+no rum
+no run
+no urtw
+no urtwn
+no zyd
+
+# Network Interfaces
+
+# PCI network interfaces
+#an*	at pci? dev ? function ?	# Aironet PC4500/PC4800 (802.11)
+#ath*	at pci? dev ? function ?	# Atheros 5210/5211/5212 802.11
+athn*	at pci? dev ? function ?	# Atheros AR9k (802.11a/g/n)
+#atw*	at pci? dev ? function ?	# ADMtek ADM8211 (802.11)
+#bwi*	at pci? dev ? function ?	# Broadcom BCM43xx wireless
+#ipw*	at pci? dev ? function ?	# Intel PRO/Wireless 2100
+#iwi*	at pci? dev ? function ?	# Intel PRO/Wireless 2200BG
+#iwn*	at pci? dev ? function ?	# Intel PRO/Wireless 4965AGN
+#iwm*	at pci? dev ? function ?	# Intel Centrino 7260
+#malo*	at pci? dev ? function ?	# Marvell Libertas Wireless
+#ral*	at pci? dev ? function ?	# Ralink Technology RT25x0 802.11a/b/g
+#rtw*	at pci? dev ? function ?	# Realtek 8180L (802.11)
+#wi*	at pci? dev ? function ?	# Intersil Prism Mini-PCI (802.11b)
+#wpi*	at pci? dev ? function ?	# Intel PRO/Wireless 3945ABG
+
+# PCMCIA network interfaces
+#an*	at pcmcia? function ?		# Aironet PC4500/PC4800 (802.11)
+#awi*	at pcmcia? function ?		# BayStack 650/660 (802.11FH/DS)
+#cnw*	at pcmcia? function ?		# Xircom/Netwave AirSurfer
+#malo*	at pcmcia? function ?		# Marvell Libertas
+#ray*	at pcmcia? function ?		# Raytheon Raylink (802.11)
+#wi*	at pcmcia? function ?		# Lucent/Intersil WaveLan IEEE (802.11)
+
+# CardBus network cards
+#ath*	at cardbus? function ?	# Atheros 5210/5211/5212 802.11
+#athn*	at cardbus? function ?	# Atheros AR9k (802.11a/g/n) - UNTESTED
+#atw*	at cardbus? function ?	# ADMtek ADM8211 (802.11)
+#ral*	at cardbus? function ?	# Ralink Technology RT25x0 802.11a/b/g
+#rtw*	at cardbus? function ?	# Realtek 8180L (802.11)
+
+# USB 802.11 adapters
+#athn*	at uhub? port ?		# Atheros AR9002U
+#atu*	at uhub? port ?		# Atmel at76c50x 802.11b
+#otus*	at uhub? port ?		# Atheros AR9001U
+#ural*	at uhub? port ?		# Ralink Technology RT2500USB 802.11a/b/g
+#rum*	at uhub? port ?		# Ralink Technology RT2501/RT2601 802.11a/b/g
+#run*	at uhub? port ?		# Ralink Technology RT(2[78]|30)00 802.11a/b/g/n
+#urtw*	at uhub? port ?		# Realtek RTL8187/RTL8187B 802.11b/g
+#urtwn*	at uhub? port ?		# Realtek RTL8188CU/RTL8192CU 802.11b/g/n
+#zyd*	at uhub? port ?		# Zydas ZD1211
