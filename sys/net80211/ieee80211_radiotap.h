@@ -1,5 +1,5 @@
-/* $FreeBSD: src/sys/net80211/ieee80211_radiotap.h,v 1.11 2007/12/13 01:23:40 sam Exp $ */
-/* $NetBSD: ieee80211_radiotap.h,v 1.24 2011/02/25 10:45:57 tron Exp $ */
+/* $FreeBSD$ */
+/* $NetBSD: ieee80211_radiotap.h,v 1.16 2007/01/06 05:51:15 dyoung Exp $ */
 
 /*-
  * Copyright (c) 2003, 2004 David Young.  All rights reserved.
@@ -12,6 +12,9 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of David Young may not be used to endorse or promote
+ *    products derived from this software without specific prior
+ *    written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY DAVID YOUNG ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
@@ -49,10 +52,13 @@
 #endif
 #endif /* defined(__KERNEL__) || defined(_KERNEL) */
 
-/* XXX tcpdump/libpcap do not tolerate variable-length headers,
- * yet, so we pad every radiotap header to 64 bytes. Ugh.
- */
-#define IEEE80211_RADIOTAP_HDRLEN	64
+#define	IEEE80211_RADIOTAP_HDRLEN	64	/* XXX deprecated */
+
+struct ieee80211_radiotap_vendor_header {
+	uint8_t		vh_oui[3];	/* 3 byte vendor OUI */
+	uint8_t		vh_sub_ns;	/* Sub namespace of this section */
+	uint16_t	vh_skip_len;	/* Length of this vendor section */
+} __packed;
 
 /*
  * The radio capture header precedes the 802.11 header.
@@ -60,25 +66,25 @@
  * Note well: all radiotap fields are little-endian.
  */
 struct ieee80211_radiotap_header {
-	uint8_t	it_version;		/* Version 0. Only increases
+	uint8_t		it_version;	/* Version 0. Only increases
 					 * for drastic changes,
 					 * introduction of compatible
 					 * new fields does not count.
 					 */
-	uint8_t	it_pad;
-	uint16_t       it_len;		/* length of the whole
+	uint8_t		it_pad;
+	uint16_t	it_len;		/* length of the whole
 					 * header in bytes, including
 					 * it_version, it_pad,
 					 * it_len, and data fields.
 					 */
-	uint32_t       it_present;	/* A bitmap telling which
+	uint32_t	it_present;	/* A bitmap telling which
 					 * fields are present. Set bit 31
 					 * (0x80000000) to extend the
 					 * bitmap by another 32 bits.
 					 * Additional extensions are made
 					 * by setting bit 31.
 					 */
-} __packed __aligned(8);
+} __packed;
 
 /*
  * Name                                 Data type       Units
@@ -99,9 +105,10 @@ struct ieee80211_radiotap_header {
  *      For frequency-hopping radios, the hop set (first byte)
  *      and pattern (second byte).
  *
- * IEEE80211_RADIOTAP_RATE              uint8_t         500kb/s
+ * IEEE80211_RADIOTAP_RATE              uint8_t         500kb/s or index
  *
- *      Tx/Rx data rate
+ *      Tx/Rx data rate.  If bit 0x80 is set then it represents an
+ *	an MCS index and not an IEEE rate.
  *
  * IEEE80211_RADIOTAP_DBM_ANTSIGNAL     int8_t          decibels from
  *                                                      one milliwatt (dBm)
@@ -161,22 +168,6 @@ struct ieee80211_radiotap_header {
  *      Unitless indication of the Rx/Tx antenna for this packet.
  *      The first antenna is antenna 0.
  *
- * IEEE80211_RADIOTAP_RX_FLAGS          uint16_t        bitmap
- *
- *     Properties of received frames. See flags defined below.
- *
- * IEEE80211_RADIOTAP_TX_FLAGS          uint16_t        bitmap
- *
- *     Properties of transmitted frames. See flags defined below.
- *
- * IEEE80211_RADIOTAP_RTS_RETRIES       uint8_t         data
- *
- *     Number of rts retries a transmitted frame used.
- *
- * IEEE80211_RADIOTAP_DATA_RETRIES      uint8_t         data
- *
- *     Number of unicast retries a transmitted frame used.
- *
  * IEEE80211_RADIOTAP_XCHANNEL          uint32_t        bitmap
  *                                      uint16_t        MHz
  *                                      uint8_t         channel number
@@ -203,13 +194,39 @@ enum ieee80211_radiotap_type {
 	IEEE80211_RADIOTAP_ANTENNA = 11,
 	IEEE80211_RADIOTAP_DB_ANTSIGNAL = 12,
 	IEEE80211_RADIOTAP_DB_ANTNOISE = 13,
+	/*
+	 * 14-17 are from Linux, they overlap the netbsd-specific
+	 * fields.
+	 */
 	IEEE80211_RADIOTAP_RX_FLAGS = 14,
 	IEEE80211_RADIOTAP_TX_FLAGS = 15,
 	IEEE80211_RADIOTAP_RTS_RETRIES = 16,
 	IEEE80211_RADIOTAP_DATA_RETRIES = 17,
+
 	IEEE80211_RADIOTAP_XCHANNEL = 18,
-	IEEE80211_RADIOTAP_EXT = 31
+	IEEE80211_RADIOTAP_MCS = 19,
+	IEEE80211_RADIOTAP_AMPDU_STATUS = 20,
+
+        IEEE80211_RADIOTAP_RADIOTAP_NAMESPACE = 29,
+	IEEE80211_RADIOTAP_VENDOREXT = 30,
+	IEEE80211_RADIOTAP_EXT = 31,
 };
+
+#ifndef _KERNEL
+/* channel attributes */
+#define	IEEE80211_CHAN_TURBO	0x00000010 /* Turbo channel */
+#define	IEEE80211_CHAN_CCK	0x00000020 /* CCK channel */
+#define	IEEE80211_CHAN_OFDM	0x00000040 /* OFDM channel */
+#define	IEEE80211_CHAN_2GHZ	0x00000080 /* 2 GHz spectrum channel. */
+#define	IEEE80211_CHAN_5GHZ	0x00000100 /* 5 GHz spectrum channel */
+#define	IEEE80211_CHAN_PASSIVE	0x00000200 /* Only passive scan allowed */
+#define	IEEE80211_CHAN_DYN	0x00000400 /* Dynamic CCK-OFDM channel */
+#define	IEEE80211_CHAN_GFSK	0x00000800 /* GFSK channel (FHSS PHY) */
+#define	IEEE80211_CHAN_GSM	0x00001000 /* 900 MHz spectrum channel */
+#define	IEEE80211_CHAN_STURBO	0x00002000 /* 11a static turbo channel only */
+#define	IEEE80211_CHAN_HALF	0x00004000 /* Half rate channel */
+#define	IEEE80211_CHAN_QUARTER	0x00008000 /* Quarter rate channel */
+#endif /* !_KERNEL */
 
 /* For IEEE80211_RADIOTAP_FLAGS */
 #define	IEEE80211_RADIOTAP_F_CFP	0x01	/* sent/received
@@ -231,22 +248,6 @@ enum ieee80211_radiotap_type {
 						 * (to 32-bit boundary)
 						 */
 #define	IEEE80211_RADIOTAP_F_BADFCS	0x40	/* does not pass FCS check */
-#define IEEE80211_RADIOTAP_F_SHORTGI	0x80	/* HT short GI */
-
-/* For IEEE80211_RADIOTAP_RX_FLAGS */
-#define IEEE80211_RADIOTAP_F_RX_BADFCS 0x0001  /* Frame failed CRC check.
-						*
-						* Deprecated: use the flag
-						* IEEE80211_RADIOTAP_F_BADFCS in
-						* the IEEE80211_RADIOTAP_FLAGS
-						* field, instead.
-						*/
-
-/* For IEEE80211_RADIOTAP_TX_FLAGS */
-#define IEEE80211_RADIOTAP_F_TX_FAIL   0x0001  /* failed due to excessive
-						* retries
-						*/
-#define IEEE80211_RADIOTAP_F_TX_CTS    0x0002  /* used cts 'protection' */
-#define IEEE80211_RADIOTAP_F_TX_RTS    0x0004  /* used rts/cts handshake */
+#define	IEEE80211_RADIOTAP_F_SHORTGI	0x80	/* HT short GI */
 
 #endif /* !_NET80211_IEEE80211_RADIOTAP_H_ */
