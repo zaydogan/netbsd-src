@@ -44,6 +44,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/systm.h>
 
 #include <sys/socket.h>
+#include <sys/once.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
@@ -306,7 +307,7 @@ ieee80211_setup_ratetable(struct ieee80211_rate_table *rt)
 
 	int i;
 
-	for (i = 0; i < nitems(rt->rateCodeToIndex); i++)
+	for (i = 0; i < __arraycount(rt->rateCodeToIndex); i++)
 		rt->rateCodeToIndex[i] = (uint8_t) -1;
 	for (i = 0; i < rt->rateCount; i++) {
 		uint8_t code = rt->info[i].dot11Rate;
@@ -350,8 +351,8 @@ ieee80211_setup_ratetable(struct ieee80211_rate_table *rt)
 }
 
 /* Setup all rate tables */
-static void
-ieee80211_phy_init(void)
+static int
+ieee80211_phy_init0(void)
 {
 	static struct ieee80211_rate_table * const ratetables[] = {
 		&ieee80211_half_table,
@@ -366,16 +367,32 @@ ieee80211_phy_init(void)
 	};
 	int i;
 
-	for (i = 0; i < nitems(ratetables); ++i)
+	for (i = 0; i < __arraycount(ratetables); ++i)
 		ieee80211_setup_ratetable(ratetables[i]);
 
+	return 0;
+
 }
+#ifdef notyet	/* XXX FBSD80211 sysinit */
 SYSINIT(wlan_phy, SI_SUB_DRIVERS, SI_ORDER_FIRST, ieee80211_phy_init, NULL);
+#else
+static void
+ieee80211_phy_init(void)
+{
+	static ONCE_DECL(ieee80211_phy_init_once);
+
+	RUN_ONCE(&ieee80211_phy_init_once, ieee80211_phy_init0);
+}
+#endif
 
 const struct ieee80211_rate_table *
 ieee80211_get_ratetable(struct ieee80211_channel *c)
 {
 	const struct ieee80211_rate_table *rt;
+
+#ifdef __NetBSD__	/* XXX FBSD80211 once init */
+	ieee80211_phy_init();
+#endif
 
 	/* XXX HT */
 	if (IEEE80211_IS_CHAN_HALF(c))
@@ -509,7 +526,7 @@ ieee80211_compute_duration(const struct ieee80211_rate_table *rt,
 	uint32_t bitsPerSymbol, numBits, numSymbols, phyTime, txTime;
 	uint32_t kbps;
 
-	KASSERT(rix != (uint8_t)-1, ("rate %d has no info", rate));
+	IASSERT(rix != (uint8_t)-1, ("rate %d has no info", rate));
 	kbps = rt->info[rix].rateKbps;
 	if (kbps == 0)			/* XXX bandaid for channel changes */
 		return 0;
@@ -525,7 +542,7 @@ ieee80211_compute_duration(const struct ieee80211_rate_table *rt,
 		break;
 	case IEEE80211_T_OFDM:
 		bitsPerSymbol	= (kbps * OFDM_SYMBOL_TIME) / 1000;
-		KASSERT(bitsPerSymbol != 0, ("full rate bps"));
+		IASSERT(bitsPerSymbol != 0, ("full rate bps"));
 
 		numBits		= OFDM_PLCP_BITS + (frameLen << 3);
 		numSymbols	= howmany(numBits, bitsPerSymbol);
@@ -535,7 +552,7 @@ ieee80211_compute_duration(const struct ieee80211_rate_table *rt,
 		break;
 	case IEEE80211_T_OFDM_HALF:
 		bitsPerSymbol	= (kbps * OFDM_HALF_SYMBOL_TIME) / 1000;
-		KASSERT(bitsPerSymbol != 0, ("1/4 rate bps"));
+		IASSERT(bitsPerSymbol != 0, ("1/4 rate bps"));
 
 		numBits		= OFDM_PLCP_BITS + (frameLen << 3);
 		numSymbols	= howmany(numBits, bitsPerSymbol);
@@ -545,7 +562,7 @@ ieee80211_compute_duration(const struct ieee80211_rate_table *rt,
 		break;
 	case IEEE80211_T_OFDM_QUARTER:
 		bitsPerSymbol	= (kbps * OFDM_QUARTER_SYMBOL_TIME) / 1000;
-		KASSERT(bitsPerSymbol != 0, ("1/2 rate bps"));
+		IASSERT(bitsPerSymbol != 0, ("1/2 rate bps"));
 
 		numBits		= OFDM_PLCP_BITS + (frameLen << 3);
 		numSymbols	= howmany(numBits, bitsPerSymbol);
@@ -556,7 +573,7 @@ ieee80211_compute_duration(const struct ieee80211_rate_table *rt,
 	case IEEE80211_T_TURBO:
 		/* we still save OFDM rates in kbps - so double them */
 		bitsPerSymbol = ((kbps << 1) * TURBO_SYMBOL_TIME) / 1000;
-		KASSERT(bitsPerSymbol != 0, ("turbo bps"));
+		IASSERT(bitsPerSymbol != 0, ("turbo bps"));
 
 		numBits       = TURBO_PLCP_BITS + (frameLen << 3);
 		numSymbols    = howmany(numBits, bitsPerSymbol);
@@ -606,8 +623,8 @@ ieee80211_compute_duration_ht(uint32_t frameLen, uint16_t rate,
 {
 	uint32_t bitsPerSymbol, numBits, numSymbols, txTime;
 
-	KASSERT(rate & IEEE80211_RATE_MCS, ("not mcs %d", rate));
-	KASSERT((rate &~ IEEE80211_RATE_MCS) < 31, ("bad mcs 0x%x", rate));
+	IASSERT(rate & IEEE80211_RATE_MCS, ("not mcs %d", rate));
+	IASSERT((rate &~ IEEE80211_RATE_MCS) < 31, ("bad mcs 0x%x", rate));
 
 	if (isht40)
 		bitsPerSymbol = ht40_bps[rate & 0x1f];

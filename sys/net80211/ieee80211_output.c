@@ -47,11 +47,11 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_output.c,v 1.52 2014/10/18 08:33:29 snj Ex
 #include <sys/socket.h>
  
 #include <net/bpf.h>
-#include <net/ethernet.h>
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_llc.h>
 #include <net/if_media.h>
-#include <net/if_vlan_var.h>
+#include <net/if_vlanvar.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_regdomain.h>
@@ -69,15 +69,13 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_output.c,v 1.52 2014/10/18 08:33:29 snj Ex
 #endif
 
 #ifdef INET
-#include <netinet/if_ether.h>
+#include <net/if_ether.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #endif
 #ifdef INET6
 #include <netinet/ip6.h>
 #endif
-
-#include <security/mac/mac_framework.h>
 
 #define	ETHER_HEADER_COPY(dst, src) \
 	memcpy(dst, src, sizeof(struct ether_header))
@@ -141,7 +139,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 	int error;
 
 	if ((ni->ni_flags & IEEE80211_NODE_PWR_MGT) &&
-	    (m->m_flags & M_PWR_SAV) == 0) {
+	    (M_GET_FLAGS(m) & M_PWR_SAV) == 0) {
 		/*
 		 * Station in power save mode; pass the frame
 		 * to the 802.11 layer and continue.  We'll get
@@ -178,7 +176,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 	 */
 	m->m_pkthdr.rcvif = (void *)ni;
 
-	BPF_MTAP(ifp, m);		/* 802.3 tx */
+	bpf_mtap(ifp, m);		/* 802.3 tx */
 
 	/*
 	 * Check if A-MPDU tx aggregation is setup or if we
@@ -194,7 +192,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 	 */
 	if ((ni->ni_flags & IEEE80211_NODE_AMPDU_TX) &&
 	    (vap->iv_flags_ht & IEEE80211_FHT_AMPDU_TX) &&
-	    (m->m_flags & M_EAPOL) == 0) {
+	    (M_GET_FLAGS(m) & M_EAPOL) == 0) {
 		int tid = WME_AC_TO_TID(M_WME_GETAC(m));
 		struct ieee80211_tx_ampdu *tap = &ni->ni_tx_ampdu[tid];
 
@@ -205,7 +203,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 			 *
 			 * XXX do tx aggregation here
 			 */
-			m->m_flags |= M_AMPDU_MPDU;
+			M_SET_FLAGS(m, M_AMPDU_MPDU);
 		} else if (!IEEE80211_AMPDU_REQUESTED(tap) &&
 		    ic->ic_ampdu_enable(ni, tap)) {
 			/*
@@ -449,7 +447,7 @@ ieee80211_vap_transmit(struct ifnet *ifp, struct mbuf *m)
 			    __func__, ieee80211_state_name[vap->iv_state]);
 			vap->iv_stats.is_tx_badstate++;
 			IEEE80211_UNLOCK(ic);
-			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
+			ifp->if_flags |= IFF_OACTIVE;
 			m_freem(m);
 			return (EINVAL);
 		}
@@ -465,7 +463,7 @@ ieee80211_vap_transmit(struct ifnet *ifp, struct mbuf *m)
 	 * NB: This must be done before ieee80211_classify as
 	 *     it marks EAPOL in frames with M_EAPOL.
 	 */
-	m->m_flags &= ~(M_80211_TX - M_PWR_SAV - M_MORE_DATA);
+	M_CLR_FLAGS(m, M_80211_TX - M_PWR_SAV - M_MORE_DATA);
 
 	/*
 	 * Bump to the packet transmission path.
@@ -498,15 +496,9 @@ ieee80211_raw_output(struct ieee80211vap *vap, struct ieee80211_node *ni,
  * connect bpf write calls to the 802.11 layer for injecting
  * raw 802.11 frames.
  */
-#if __FreeBSD_version >= 1000031
 int
 ieee80211_output(struct ifnet *ifp, struct mbuf *m,
-	const struct sockaddr *dst, struct route *ro)
-#else
-int
-ieee80211_output(struct ifnet *ifp, struct mbuf *m,
-	struct sockaddr *dst, struct route *ro)
-#endif
+	const struct sockaddr *dst, struct rtentry *ro)
 {
 #define senderr(e) do { error = (e); goto bad;} while (0)
 	struct ieee80211_node *ni = NULL;
@@ -516,7 +508,7 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m,
 	int error;
 	int ret;
 
-	if (ifp->if_drv_flags & IFF_DRV_OACTIVE) {
+	if (ifp->if_flags & IFF_OACTIVE) {
 		/*
 		 * Short-circuit requests if the vap is marked OACTIVE
 		 * as this can happen because a packet came down through
@@ -540,7 +532,11 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m,
 	if (error)
 		senderr(error);
 #endif
+#ifdef notyet	/* XXX FBSD80211 IFF_MONITOR */
 	if (ifp->if_flags & IFF_MONITOR)
+#else
+	if (vap->iv_opmode == IEEE80211_M_MONITOR)
+#endif
 		senderr(ENETDOWN);
 	if (!IFNET_IS_UP_RUNNING(ifp))
 		senderr(ENETDOWN);
@@ -592,7 +588,7 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m,
 	 * NB: This must be done before ieee80211_classify as
 	 *     it marks EAPOL in frames with M_EAPOL.
 	 */
-	m->m_flags &= ~M_80211_TX;
+	M_CLR_FLAGS(m, M_80211_TX);
 
 	/* calculate priority so drivers can find the tx queue */
 	/* XXX assumes an 802.3 frame */
@@ -603,7 +599,7 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m,
 	IEEE80211_NODE_STAT(ni, tx_data);
 	if (IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 		IEEE80211_NODE_STAT(ni, tx_mcast);
-		m->m_flags |= M_MCAST;
+		M_SET_FLAGS(m, M_MCAST);
 	} else
 		IEEE80211_NODE_STAT(ni, tx_ucast);
 	/* NB: ieee80211_encap does not include 802.11 header */
@@ -719,7 +715,7 @@ ieee80211_send_setup(
 
 	tap = &ni->ni_tx_ampdu[tid];
 	if (tid != IEEE80211_NONQOS_TID && IEEE80211_AMPDU_RUNNING(tap))
-		m->m_flags |= M_AMPDU_MPDU;
+		M_SET_FLAGS(m, M_AMPDU_MPDU);
 	else {
 		seqno = ni->ni_txseqs[tid]++;
 		*(uint16_t *)&wh->i_seq[0] =
@@ -728,7 +724,7 @@ ieee80211_send_setup(
 	}
 
 	if (IEEE80211_IS_MULTICAST(wh->i_addr1))
-		m->m_flags |= M_MCAST;
+		M_SET_FLAGS(m, M_MCAST);
 #undef WH4
 }
 
@@ -749,7 +745,7 @@ ieee80211_mgmt_output(struct ieee80211_node *ni, struct mbuf *m, int type,
 	struct ieee80211_frame *wh;
 	int ret;
 
-	KASSERT(ni != NULL, ("null node"));
+	IASSERT(ni != NULL, ("null node"));
 
 	if (vap->iv_state == IEEE80211_S_CAC) {
 		IEEE80211_NOTE(vap, IEEE80211_MSG_OUTPUT | IEEE80211_MSG_DOTH,
@@ -780,9 +776,9 @@ ieee80211_mgmt_output(struct ieee80211_node *ni, struct mbuf *m, int type,
 		    "encrypting frame (%s)", __func__);
 		wh->i_fc[1] |= IEEE80211_FC1_PROTECTED;
 	}
-	m->m_flags |= M_ENCAP;		/* mark encapsulated */
+	M_SET_FLAGS(m, M_ENCAP);		/* mark encapsulated */
 
-	KASSERT(type != IEEE80211_FC0_SUBTYPE_PROBE_RESP, ("probe response?"));
+	IASSERT(type != IEEE80211_FC0_SUBTYPE_PROBE_RESP, ("probe response?"));
 	M_WME_SETAC(m, params->ibp_pri);
 
 #ifdef IEEE80211_DEBUG
@@ -852,7 +848,7 @@ ieee80211_send_nulldata(struct ieee80211_node *ni)
 		vap->iv_stats.is_tx_nobuf++;
 		return ENOMEM;
 	}
-	KASSERT(M_LEADINGSPACE(m) >= hdrlen,
+	IASSERT(M_LEADINGSPACE(m) >= hdrlen,
 	    ("leading space %zd", M_LEADINGSPACE(m)));
 	M_PREPEND(m, hdrlen, M_NOWAIT);
 	if (m == NULL) {
@@ -893,7 +889,7 @@ ieee80211_send_nulldata(struct ieee80211_node *ni)
 			wh->i_fc[1] |= IEEE80211_FC1_PWR_MGT;
 	}
 	m->m_len = m->m_pkthdr.len = hdrlen;
-	m->m_flags |= M_ENCAP;		/* mark encapsulated */
+	M_SET_FLAGS(m, M_ENCAP);		/* mark encapsulated */
 
 	M_WME_SETAC(m, WME_AC_BE);
 
@@ -927,7 +923,7 @@ ieee80211_classify(struct ieee80211_node *ni, struct mbuf *m)
 	 */
 	if (eh->ether_type == htons(ETHERTYPE_PAE)) {
 		/* NB: mark so others don't need to check header */
-		m->m_flags |= M_EAPOL;
+		M_SET_FLAGS(m, M_EAPOL);
 		ac = WME_AC_VO;
 		goto done;
 	}
@@ -945,12 +941,13 @@ ieee80211_classify(struct ieee80211_node *ni, struct mbuf *m)
 	 */
 	v_wme_ac = 0;
 	if (ni->ni_vlan != 0) {
-		 if ((m->m_flags & M_VLANTAG) == 0) {
+		struct m_tag *mtag = m_tag_find(m, PACKET_TAG_VLAN, NULL);
+		 if (mtag == NULL) {
 			IEEE80211_NODE_STAT(ni, tx_novlantag);
 			return 1;
 		}
-		if (EVL_VLANOFTAG(m->m_pkthdr.ether_vtag) !=
-		    EVL_VLANOFTAG(ni->ni_vlan)) {
+		u_int vlan_id = *(u_int *)(mtag + 1);
+		if (EVL_VLANOFTAG(vlan_id) != EVL_VLANOFTAG(ni->ni_vlan)) {
 			IEEE80211_NODE_STAT(ni, tx_vlanmismatch);
 			return 1;
 		}
@@ -981,7 +978,7 @@ ieee80211_classify(struct ieee80211_node *ni, struct mbuf *m)
 		 */
 		m_copydata(m, sizeof(struct ether_header) +
 		    offsetof(struct ip6_hdr, ip6_flow), sizeof(flow),
-		    (caddr_t) &flow);
+		    (char *) &flow);
 		tos = (uint8_t)(ntohl(flow) >> 20);
 		tos >>= 5;		/* NB: ECN + low 3 bits of DSCP */
 		d_wme_ac = TID_TO_WME_AC(tos);
@@ -1022,6 +1019,144 @@ done:
 	M_WME_SETAC(m, ac);
 	return 0;
 }
+
+#ifdef __NetBSD__	/* XXX FBSD80211 m_unshare M_WRITABLE */
+/*
+ * Evaluate TRUE if it's safe to write to the mbuf m's data region (this can
+ * be both the local data payload, or an external buffer area, depending on
+ * whether M_EXT is set).
+ */
+#define	M_WRITABLE(m)	(!(((m)->m_flags & M_EXT)) || 			\
+			 (((m)->m_ext.ext_refcnt) == 1))
+
+/*
+ * Create a writable copy of the mbuf chain.  While doing this
+ * we compact the chain with a goal of producing a chain with
+ * at most two mbufs.  The second mbuf in this chain is likely
+ * to be a cluster.  The primary purpose of this work is to create
+ * a writable packet for encryption, compression, etc.  The
+ * secondary goal is to linearize the data so the data can be
+ * passed to crypto hardware in the most efficient manner possible.
+ */
+static struct mbuf *
+m_unshare(struct mbuf *m0, int how)
+{
+	struct mbuf *m, *mprev;
+	struct mbuf *n, *mfirst, *mlast;
+	int len, off;
+
+	mprev = NULL;
+	for (m = m0; m != NULL; m = mprev->m_next) {
+		/*
+		 * Regular mbufs are ignored unless there's a cluster
+		 * in front of it that we can use to coalesce.  We do
+		 * the latter mainly so later clusters can be coalesced
+		 * also w/o having to handle them specially (i.e. convert
+		 * mbuf+cluster -> cluster).  This optimization is heavily
+		 * influenced by the assumption that we're running over
+		 * Ethernet where MCLBYTES is large enough that the max
+		 * packet size will permit lots of coalescing into a
+		 * single cluster.  This in turn permits efficient
+		 * crypto operations, especially when using hardware.
+		 */
+		if ((m->m_flags & M_EXT) == 0) {
+			if (mprev && (mprev->m_flags & M_EXT) &&
+			    m->m_len <= M_TRAILINGSPACE(mprev)) {
+				/* XXX: this ignores mbuf types */
+				memcpy(mtod(mprev, char *) + mprev->m_len,
+				       mtod(m, char *), m->m_len);
+				mprev->m_len += m->m_len;
+				mprev->m_next = m->m_next;	/* unlink from chain */
+				m_free(m);			/* reclaim mbuf */
+#if 0
+				newipsecstat.ips_mbcoalesced++;
+#endif
+			} else {
+				mprev = m;
+			}
+			continue;
+		}
+		/*
+		 * Writable mbufs are left alone (for now).
+		 */
+		if (M_WRITABLE(m)) {
+			mprev = m;
+			continue;
+		}
+
+		/*
+		 * Not writable, replace with a copy or coalesce with
+		 * the previous mbuf if possible (since we have to copy
+		 * it anyway, we try to reduce the number of mbufs and
+		 * clusters so that future work is easier).
+		 */
+		IASSERT(m->m_flags & M_EXT, ("m_flags 0x%x", m->m_flags));
+		/* NB: we only coalesce into a cluster or larger */
+		if (mprev != NULL && (mprev->m_flags & M_EXT) &&
+		    m->m_len <= M_TRAILINGSPACE(mprev)) {
+			/* XXX: this ignores mbuf types */
+			memcpy(mtod(mprev, char *) + mprev->m_len,
+			       mtod(m, char *), m->m_len);
+			mprev->m_len += m->m_len;
+			mprev->m_next = m->m_next;	/* unlink from chain */
+			m_free(m);			/* reclaim mbuf */
+#if 0
+			newipsecstat.ips_clcoalesced++;
+#endif
+			continue;
+		}
+
+		/*
+		 * Allocate new space to hold the copy and copy the data.
+		 * We deal with jumbo mbufs (i.e. m_len > MCLBYTES) by
+		 * splitting them into clusters.  We could just malloc a
+		 * buffer and make it external but too many device drivers
+		 * don't know how to break up the non-contiguous memory when
+		 * doing DMA.
+		 */
+		n = m_getcl(how, m->m_type, m->m_flags);
+		if (n == NULL) {
+			m_freem(m0);
+			return (NULL);
+		}
+		len = m->m_len;
+		off = 0;
+		mfirst = n;
+		mlast = NULL;
+		for (;;) {
+			int cc = min(len, MCLBYTES);
+			memcpy(mtod(n, char *), mtod(m, char *) + off, cc);
+			n->m_len = cc;
+			if (mlast != NULL)
+				mlast->m_next = n;
+			mlast = n;	
+#if 0
+			newipsecstat.ips_clcopied++;
+#endif
+
+			len -= cc;
+			if (len <= 0)
+				break;
+			off += cc;
+
+			n = m_getcl(how, m->m_type, m->m_flags);
+			if (n == NULL) {
+				m_freem(mfirst);
+				m_freem(m0);
+				return (NULL);
+			}
+		}
+		n->m_next = m->m_next; 
+		if (mprev == NULL)
+			m0 = mfirst;		/* new head of chain */
+		else
+			mprev->m_next = mfirst;	/* replace old mbuf */
+		m_free(m);			/* release old mbuf */
+		mprev = mfirst;
+	}
+	return (m0);
+}
+#endif	/* __NetBSD__ XXX FBSD80211 m_unshare M_WRITABLE */
 
 /*
  * Insure there is sufficient contiguous space to encapsulate the
@@ -1074,8 +1209,9 @@ ieee80211_mbuf_adjust(struct ieee80211vap *vap, int hdrsize,
 			m_freem(m);
 			return NULL;
 		}
-		KASSERT(needed_space <= MHLEN,
-		    ("not enough room, need %u got %d\n", needed_space, MHLEN));
+		IASSERT(needed_space <= MHLEN,
+		    ("not enough room, need %u got %zu\n", needed_space,
+		    MHLEN));
 		/*
 		 * Setup new mbuf to have leading space to prepend the
 		 * 802.11 header and any crypto header bits that are
@@ -1178,8 +1314,8 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 	 * rest of the code assumes it's ok to strip it when
 	 * reorganizing state for the final encapsulation.
 	 */
-	KASSERT(m->m_len >= sizeof(eh), ("no ethernet header!"));
-	ETHER_HEADER_COPY(&eh, mtod(m, caddr_t));
+	IASSERT(m->m_len >= sizeof(eh), ("no ethernet header!"));
+	ETHER_HEADER_COPY(&eh, mtod(m, char *));
 
 	/*
 	 * Insure space for additional headers.  First identify
@@ -1201,7 +1337,7 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 			key = ieee80211_crypto_getucastkey(vap, ni);
 		else
 			key = ieee80211_crypto_getmcastkey(vap, ni);
-		if (key == NULL && (m->m_flags & M_EAPOL) == 0) {
+		if (key == NULL && (M_GET_FLAGS(m) & M_EAPOL) == 0) {
 			IEEE80211_NOTE_MAC(vap, IEEE80211_MSG_CRYPTO,
 			    eh.ether_dhost,
 			    "no default transmit key (%s) deftxkey %u",
@@ -1221,7 +1357,7 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 	 */
 	addqos = ((ni->ni_flags & (IEEE80211_NODE_QOS|IEEE80211_NODE_HT)) ||
 	    (vap->iv_opmode == IEEE80211_M_MBSS)) &&
-	    (m->m_flags & M_EAPOL) == 0;
+	    (M_GET_FLAGS(m) & M_EAPOL) == 0;
 	if (addqos)
 		hdrsize = sizeof(struct ieee80211_qosframe);
 	else
@@ -1245,7 +1381,7 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 		is4addr = 0;		/* NB: don't use, disable */
 		if (!IEEE80211_IS_MULTICAST(eh.ether_dhost)) {
 			rt = ieee80211_mesh_rt_find(vap, eh.ether_dhost);
-			KASSERT(rt != NULL, ("route is NULL"));
+			IASSERT(rt != NULL, ("route is NULL"));
 			dir = IEEE80211_FC1_DIR_DSTODS;
 			hdrsize += IEEE80211_ADDR_LEN;
 			if (rt->rt_flags & IEEE80211_MESHRT_FLAGS_PROXY) {
@@ -1303,7 +1439,7 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 	else
 		hdrspace = hdrsize;
 
-	if (__predict_true((m->m_flags & M_FF) == 0)) {
+	if (__predict_true((M_GET_FLAGS(m) & M_FF) == 0)) {
 		/*
 		 * Normal frame.
 		 */
@@ -1415,7 +1551,7 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 			qos = ((struct ieee80211_qosframe *) wh)->i_qos;
 			break;
 		case IEEE80211_MESH_AE_10:	/* ucast, proxy */
-			KASSERT(rt != NULL, ("route is NULL"));
+			IASSERT(rt != NULL, ("route is NULL"));
 			IEEE80211_ADDR_COPY(wh->i_addr1, rt->rt_nexthop);
 			IEEE80211_ADDR_COPY(wh->i_addr2, vap->iv_myaddr);
 			IEEE80211_ADDR_COPY(wh->i_addr3, rt->rt_mesh_gate);
@@ -1426,7 +1562,7 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 			qos = ((struct ieee80211_qosframe_addr4 *) wh)->i_qos;
 			break;
 		default:
-			KASSERT(0, ("meshae %d", meshae));
+			IASSERT(0, ("meshae %d", meshae));
 			break;
 		}
 		mc->mc_ttl = ms->ms_ttl;
@@ -1438,7 +1574,7 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 	default:
 		goto bad;
 	}
-	if (m->m_flags & M_MORE_DATA)
+	if (M_GET_FLAGS(m) & M_MORE_DATA)
 		wh->i_fc[1] |= IEEE80211_FC1_MORE_DATA;
 	if (addqos) {
 		int ac, tid;
@@ -1462,7 +1598,7 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 			qos[1] = 0;
 		wh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_QOS;
 
-		if ((m->m_flags & M_AMPDU_MPDU) == 0) {
+		if ((M_GET_FLAGS(m) & M_AMPDU_MPDU) == 0) {
 			/*
 			 * NB: don't assign a sequence # to potential
 			 * aggregates; we expect this happens at the
@@ -1492,13 +1628,13 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 	txfrag = (m->m_pkthdr.len > vap->iv_fragthreshold &&
 	    !IEEE80211_IS_MULTICAST(wh->i_addr1) &&
 	    (vap->iv_caps & IEEE80211_C_TXFRAG) &&
-	    (m->m_flags & (M_FF | M_AMPDU_MPDU)) == 0);
+	    (M_GET_FLAGS(m) & (M_FF | M_AMPDU_MPDU)) == 0);
 	if (key != NULL) {
 		/*
 		 * IEEE 802.1X: send EAPOL frames always in the clear.
 		 * WPA/WPA2: encrypt EAPOL keys when pairwise keys are set.
 		 */
-		if ((m->m_flags & M_EAPOL) == 0 ||
+		if ((M_GET_FLAGS(m) & M_EAPOL) == 0 ||
 		    ((vap->iv_flags & IEEE80211_F_WPA) &&
 		     (vap->iv_opmode == IEEE80211_M_STA ?
 		      !IEEE80211_KEY_UNDEFINED(key) :
@@ -1517,12 +1653,12 @@ ieee80211_encap(struct ieee80211vap *vap, struct ieee80211_node *ni,
 	    key != NULL ? key->wk_cipher->ic_header : 0, vap->iv_fragthreshold))
 		goto bad;
 
-	m->m_flags |= M_ENCAP;		/* mark encapsulated */
+	M_SET_FLAGS(m, M_ENCAP);		/* mark encapsulated */
 
 	IEEE80211_NODE_STAT(ni, tx_data);
 	if (IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 		IEEE80211_NODE_STAT(ni, tx_mcast);
-		m->m_flags |= M_MCAST;
+		M_SET_FLAGS(m, M_MCAST);
 	} else
 		IEEE80211_NODE_STAT(ni, tx_ucast);
 	IEEE80211_NODE_STAT_ADD(ni, tx_bytes, datalen);
@@ -1554,8 +1690,8 @@ ieee80211_fragment(struct ieee80211vap *vap, struct mbuf *m0,
 	u_int totalhdrsize, fragno, fragsize, off, remainder, payload;
 	u_int hdrspace;
 
-	KASSERT(m0->m_nextpkt == NULL, ("mbuf already chained?"));
-	KASSERT(m0->m_pkthdr.len > mtu,
+	IASSERT(m0->m_nextpkt == NULL, ("mbuf already chained?"));
+	IASSERT(m0->m_pkthdr.len > mtu,
 		("pktlen %u mtu %u", m0->m_pkthdr.len, mtu));
 
 	/*
@@ -1579,7 +1715,7 @@ ieee80211_fragment(struct ieee80211vap *vap, struct mbuf *m0,
 		if (fragsize > mtu)
 			fragsize = mtu;
 		/* XXX fragsize can be >2048! */
-		KASSERT(fragsize < MCLBYTES,
+		IASSERT(fragsize < MCLBYTES,
 			("fragment size %u too big!", fragsize));
 		if (fragsize > MHLEN)
 			m = m_getcl(M_NOWAIT, MT_DATA, M_PKTHDR);
@@ -1620,7 +1756,7 @@ ieee80211_fragment(struct ieee80211vap *vap, struct mbuf *m0,
 		m_copydata(m0, off, payload, mtod(m, uint8_t *) + hdrspace);
 		m->m_len = hdrspace + payload;
 		m->m_pkthdr.len = hdrspace + payload;
-		m->m_flags |= M_FRAG;
+		M_SET_FLAGS(m, M_FRAG);
 
 		/* chain up the fragment */
 		prev->m_nextpkt = m;
@@ -1632,12 +1768,12 @@ ieee80211_fragment(struct ieee80211vap *vap, struct mbuf *m0,
 	} while (remainder != 0);
 
 	/* set the last fragment */
-	m->m_flags |= M_LASTFRAG;
+	M_SET_FLAGS(m, M_LASTFRAG);
 	whf->i_fc[1] &= ~IEEE80211_FC1_MORE_FRAG;
 
 	/* strip first mbuf now that everything has been copied */
 	m_adj(m0, -(m0->m_pkthdr.len - (mtu - ciphdrsize)));
-	m0->m_flags |= M_FIRSTFRAG | M_FRAG;
+	M_SET_FLAGS(m0, M_FIRSTFRAG | M_FRAG);
 
 	vap->iv_stats.is_tx_fragframes++;
 	vap->iv_stats.is_tx_frags += fragno-1;
@@ -1800,7 +1936,7 @@ ieee80211_add_wme_param(uint8_t *frm, struct ieee80211_wme_state *wme)
 	int i;
 
 	memcpy(frm, &param, sizeof(param));
-	frm += __offsetof(struct ieee80211_wme_info, wme_info);
+	frm += offsetof(struct ieee80211_wme_info, wme_info);
 	*frm++ = wme->wme_bssChanParams.cap_info;	/* AC info */
 	*frm++ = 0;					/* reserved field */
 	for (i = 0; i < WME_NUM_AC; i++) {
@@ -1985,7 +2121,6 @@ ieee80211_send_probereq(struct ieee80211_node *ni,
 	struct ieee80211com *ic = ni->ni_ic;
 	const struct ieee80211_txparam *tp;
 	struct ieee80211_bpf_params params;
-	struct ieee80211_frame *wh;
 	const struct ieee80211_rateset *rs;
 	struct mbuf *m;
 	uint8_t *frm;
@@ -2045,7 +2180,7 @@ ieee80211_send_probereq(struct ieee80211_node *ni,
 		frm = add_appie(frm, vap->iv_appie_probereq);
 	m->m_pkthdr.len = m->m_len = frm - mtod(m, uint8_t *);
 
-	KASSERT(M_LEADINGSPACE(m) >= sizeof(struct ieee80211_frame),
+	IASSERT(M_LEADINGSPACE(m) >= sizeof(struct ieee80211_frame),
 	    ("leading space %zd", M_LEADINGSPACE(m)));
 	M_PREPEND(m, sizeof(struct ieee80211_frame), M_NOWAIT);
 	if (m == NULL) {
@@ -2055,12 +2190,11 @@ ieee80211_send_probereq(struct ieee80211_node *ni,
 	}
 
 	IEEE80211_TX_LOCK(ic);
-	wh = mtod(m, struct ieee80211_frame *);
 	ieee80211_send_setup(ni, m,
 	     IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_PROBE_REQ,
 	     IEEE80211_NONQOS_TID, sa, da, bssid);
 	/* XXX power management? */
-	m->m_flags |= M_ENCAP;		/* mark encapsulated */
+	M_SET_FLAGS(m, M_ENCAP);		/* mark encapsulated */
 
 	M_WME_SETAC(m, WME_AC_BE);
 
@@ -2096,7 +2230,7 @@ ieee80211_getcapinfo(struct ieee80211vap *vap, struct ieee80211_channel *chan)
 	struct ieee80211com *ic = vap->iv_ic;
 	uint16_t capinfo;
 
-	KASSERT(vap->iv_opmode != IEEE80211_M_STA, ("station mode"));
+	IASSERT(vap->iv_opmode != IEEE80211_M_STA, ("station mode"));
 
 	if (vap->iv_opmode == IEEE80211_M_HOSTAP)
 		capinfo = IEEE80211_CAPINFO_ESS;
@@ -2135,7 +2269,7 @@ ieee80211_send_mgmt(struct ieee80211_node *ni, int type, int arg)
 	uint16_t capinfo;
 	int has_challenge, is_shared_key, ret, status;
 
-	KASSERT(ni != NULL, ("null node"));
+	IASSERT(ni != NULL, ("null node"));
 
 	/*
 	 * Hold a reference on the node so it doesn't go away until after
@@ -2273,7 +2407,7 @@ ieee80211_send_mgmt(struct ieee80211_node *ni, int type, int arg)
 		if (m == NULL)
 			senderr(ENOMEM, is_tx_nobuf);
 
-		KASSERT(vap->iv_opmode == IEEE80211_M_STA,
+		IASSERT(vap->iv_opmode == IEEE80211_M_STA,
 		    ("wrong mode %u", vap->iv_opmode));
 		capinfo = IEEE80211_CAPINFO_ESS;
 		if (vap->iv_flags & IEEE80211_F_PRIVACY)
@@ -2294,7 +2428,7 @@ ieee80211_send_mgmt(struct ieee80211_node *ni, int type, int arg)
 		*(uint16_t *)frm = htole16(capinfo);
 		frm += 2;
 
-		KASSERT(bss->ni_intval != 0, ("beacon interval is zero!"));
+		IASSERT(bss->ni_intval != 0, ("beacon interval is zero!"));
 		*(uint16_t *)frm = htole16(howmany(ic->ic_lintval,
 						    bss->ni_intval));
 		frm += 2;
@@ -2635,7 +2769,6 @@ ieee80211_send_proberesp(struct ieee80211vap *vap,
 {
 	struct ieee80211_node *bss = vap->iv_bss;
 	struct ieee80211com *ic = vap->iv_ic;
-	struct ieee80211_frame *wh;
 	struct mbuf *m;
 	int ret;
 
@@ -2664,15 +2797,14 @@ ieee80211_send_proberesp(struct ieee80211vap *vap,
 	}
 
 	M_PREPEND(m, sizeof(struct ieee80211_frame), M_NOWAIT);
-	KASSERT(m != NULL, ("no room for header"));
+	IASSERT(m != NULL, ("no room for header"));
 
 	IEEE80211_TX_LOCK(ic);
-	wh = mtod(m, struct ieee80211_frame *);
 	ieee80211_send_setup(bss, m,
 	     IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_PROBE_RESP,
 	     IEEE80211_NONQOS_TID, vap->iv_myaddr, da, bss->ni_bssid);
 	/* XXX power management? */
-	m->m_flags |= M_ENCAP;		/* mark encapsulated */
+	M_SET_FLAGS(m, M_ENCAP);		/* mark encapsulated */
 
 	M_WME_SETAC(m, WME_AC_BE);
 
@@ -2804,7 +2936,6 @@ ieee80211_beacon_construct(struct mbuf *m, uint8_t *frm,
 	struct ieee80211com *ic = ni->ni_ic;
 	struct ieee80211_rateset *rs = &ni->ni_rates;
 	uint16_t capinfo;
-
 	/*
 	 * beacon frame format
 	 *	[8] time stamp
@@ -3045,7 +3176,7 @@ ieee80211_beacon_alloc(struct ieee80211_node *ni,
 	ieee80211_beacon_construct(m, frm, bo, ni);
 
 	M_PREPEND(m, sizeof(struct ieee80211_frame), M_NOWAIT);
-	KASSERT(m != NULL, ("no space for 802.11 header?"));
+	IASSERT(m != NULL, ("no space for 802.11 header?"));
 	wh = mtod(m, struct ieee80211_frame *);
 	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_MGT |
 	    IEEE80211_FC0_SUBTYPE_BEACON;
@@ -3200,7 +3331,7 @@ ieee80211_beacon_update(struct ieee80211_node *ni,
 						timoff = i &~ 1;
 						break;
 					}
-				KASSERT(timoff != 128, ("tim bitmap empty!"));
+				IASSERT(timoff != 128, ("tim bitmap empty!"));
 				for (i = vap->iv_tim_len-1; i >= timoff; i--)
 					if (vap->iv_tim_bitmap[i])
 						break;
@@ -3405,7 +3536,7 @@ ieee80211_tx_complete(struct ieee80211_node *ni, struct mbuf *m, int status)
 {
 
 	if (ni != NULL) {
-		if (m->m_flags & M_TXCB)
+		if (M_GET_FLAGS(m) & M_TXCB)
 			ieee80211_process_callback(ni, m, status);
 		ieee80211_free_node(ni);
 	}

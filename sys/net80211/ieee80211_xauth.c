@@ -58,7 +58,6 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_xauth.c,v 1.5 2006/02/27 01:08:28 dyoung E
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 #include <net/route.h>
 
 #include <net80211/ieee80211_var.h>

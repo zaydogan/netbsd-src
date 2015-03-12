@@ -10,14 +10,14 @@ file	net80211/ieee80211_acl.c		wlan
 file	net80211/ieee80211_action.c		wlan
 file	net80211/ieee80211_adhoc.c		wlan
 file	net80211/ieee80211_ageq.c		wlan
-file	net80211/ieee80211_alq.c		wlan
+#file	net80211/ieee80211_alq.c		wlan
 file	net80211/ieee80211_amrr.c		wlan
 file	net80211/ieee80211_crypto.c		wlan
 file	net80211/ieee80211_crypto_ccmp.c	wlan
 file	net80211/ieee80211_crypto_none.c	wlan
 file	net80211/ieee80211_crypto_tkip.c	wlan
 file	net80211/ieee80211_crypto_wep.c		wlan
-file	net80211/ieee80211_ddb.c		wlan
+#file	net80211/ieee80211_ddb.c		wlan
 file	net80211/ieee80211_dfs.c		wlan
 file	net80211/ieee80211_hostap.c		wlan
 file	net80211/ieee80211_ht.c			wlan

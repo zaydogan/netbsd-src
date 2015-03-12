@@ -130,7 +130,7 @@ rssadapt_init(struct ieee80211vap *vap)
 {
 	struct ieee80211_rssadapt *rs;
 
-	KASSERT(vap->iv_rs == NULL, ("%s: iv_rs already initialized",
+	IASSERT(vap->iv_rs == NULL, ("%s: iv_rs already initialized",
 	    __func__));
 	
 	vap->iv_rs = rs = malloc(sizeof(struct ieee80211_rssadapt),

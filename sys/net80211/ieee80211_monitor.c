@@ -55,7 +55,6 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <net/if.h>
 #include <net/if_media.h>
 #include <net/if_llc.h>
-#include <net/ethernet.h>
 
 #include <net/bpf.h>
 

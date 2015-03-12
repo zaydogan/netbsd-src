@@ -48,7 +48,6 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 
 #include <net80211/ieee80211_var.h>
 
@@ -104,8 +103,6 @@ static	void scan_mindwell(struct ieee80211_scan_state *);
 static	void scan_signal(void *);
 static	void scan_task(void *, int);
 
-MALLOC_DEFINE(M_80211_SCAN, "80211scan", "802.11 scan state");
-
 void
 ieee80211_scan_attach(struct ieee80211com *ic)
 {
@@ -139,7 +136,7 @@ ieee80211_scan_detach(struct ieee80211com *ic)
 		IEEE80211_UNLOCK(ic);
 		ieee80211_draintask(ic, &SCAN_PRIVATE(ss)->ss_scan_task);
 		callout_drain(&SCAN_PRIVATE(ss)->ss_scan_timer);
-		KASSERT((ic->ic_flags & IEEE80211_F_SCAN) == 0,
+		IASSERT((ic->ic_flags & IEEE80211_F_SCAN) == 0,
 		    ("scan still running"));
 		if (ss->ss_ops != NULL) {
 			ss->ss_ops->scan_detach(ss);

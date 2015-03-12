@@ -44,6 +44,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/mbuf.h>   
 #include <sys/malloc.h>
 #include <sys/kernel.h>
+#include <sys/mbuf.h>
 
 #include <sys/socket.h>
 #include <sys/sockio.h>
@@ -53,9 +54,9 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 #include <net/if_llc.h>
-#include <net/ethernet.h>
 
 #include <net/bpf.h>
 
@@ -360,14 +361,9 @@ hostap_deliver_data(struct ieee80211vap *vap,
 	struct ifnet *ifp = vap->iv_ifp;
 
 	/* clear driver/net80211 flags before passing up */
-#if __FreeBSD_version >= 1000046
-	m->m_flags &= ~(M_MCAST | M_BCAST);
-	m_clrprotoflags(m);
-#else
-	m->m_flags &= ~(M_80211_RX | M_MCAST | M_BCAST);
-#endif
+	M_CLR_FLAGS(m, M_80211_RX | M_MCAST | M_BCAST);
 
-	KASSERT(vap->iv_opmode == IEEE80211_M_HOSTAP,
+	IASSERT(vap->iv_opmode == IEEE80211_M_HOSTAP,
 	    ("gack, opmode %d", vap->iv_opmode));
 	/*
 	 * Do accounting.
@@ -376,7 +372,7 @@ hostap_deliver_data(struct ieee80211vap *vap,
 	IEEE80211_NODE_STAT(ni, rx_data);
 	IEEE80211_NODE_STAT_ADD(ni, rx_bytes, m->m_pkthdr.len);
 	if (ETHER_IS_MULTICAST(eh->ether_dhost)) {
-		m->m_flags |= M_MCAST;		/* XXX M_BCAST? */
+		M_SET_FLAGS(m, M_MCAST);		/* XXX M_BCAST? */
 		IEEE80211_NODE_STAT(ni, rx_mcast);
 	} else
 		IEEE80211_NODE_STAT(ni, rx_ucast);
@@ -385,12 +381,12 @@ hostap_deliver_data(struct ieee80211vap *vap,
 	if ((vap->iv_flags & IEEE80211_F_NOBRIDGE) == 0) {
 		struct mbuf *mcopy = NULL;
 
-		if (m->m_flags & M_MCAST) {
-			mcopy = m_dup(m, M_NOWAIT);
+		if (M_GET_FLAGS(m) & M_MCAST) {
+			mcopy = m_dup(m, 0, M_COPYALL, M_NOWAIT);
 			if (mcopy == NULL)
 				ifp->if_oerrors++;
 			else
-				mcopy->m_flags |= M_MCAST;
+				M_SET_FLAGS(mcopy, M_MCAST);
 		} else {
 			/*
 			 * Check if the destination is associated with the
@@ -420,8 +416,7 @@ hostap_deliver_data(struct ieee80211vap *vap,
 			}
 		}
 		if (mcopy != NULL) {
-			int len, err;
-			len = mcopy->m_pkthdr.len;
+			int err;
 			err = ieee80211_vap_xmitpkt(vap, mcopy);
 			if (err) {
 				/* NB: IFQ_HANDOFF reclaims mcopy */
@@ -435,7 +430,7 @@ hostap_deliver_data(struct ieee80211vap *vap,
 		 * Mark frame as coming from vap's interface.
 		 */
 		m->m_pkthdr.rcvif = ifp;
-		if (m->m_flags & M_MCAST) {
+		if (M_GET_FLAGS(m) & M_MCAST) {
 			/*
 			 * Spam DWDS vap's w/ multicast traffic.
 			 */
@@ -444,8 +439,7 @@ hostap_deliver_data(struct ieee80211vap *vap,
 		}
 		if (ni->ni_vlan != 0) {
 			/* attach vlan tag */
-			m->m_pkthdr.ether_vtag = ni->ni_vlan;
-			m->m_flags |= M_VLANTAG;
+			VLAN_INPUT_TAG(ifp, m, ni->ni_vlan, return);
 		}
 		ifp->if_input(ifp, m);
 	}
@@ -494,7 +488,7 @@ hostap_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 	uint8_t *bssid;
 	uint16_t rxseq;
 
-	if (m->m_flags & M_AMPDU_MPDU) {
+	if (M_GET_FLAGS(m) & M_AMPDU_MPDU) {
 		/*
 		 * Fastpath for A-MPDU reorder q resubmission.  Frames
 		 * w/ M_AMPDU_MPDU marked have already passed through
@@ -511,7 +505,7 @@ hostap_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 		goto resubmit_ampdu;
 	}
 
-	KASSERT(ni != NULL, ("null node"));
+	IASSERT(ni != NULL, ("null node"));
 	ni->ni_inact = ni->ni_inact_reload;
 
 	type = -1;			/* undefined */
@@ -683,7 +677,7 @@ hostap_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 		 * will return 0; otherwise it has consumed the mbuf
 		 * and we should do nothing more with it.
 		 */
-		if ((m->m_flags & M_AMPDU) &&
+		if ((M_GET_FLAGS(m) & M_AMPDU) &&
 		    ieee80211_ampdu_reorder(ni, m) != 0) {
 			m = NULL;
 			goto out;
@@ -799,7 +793,7 @@ hostap_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 			 * any non-PAE frames received without encryption.
 			 */
 			if ((vap->iv_flags & IEEE80211_F_DROPUNENC) &&
-			    (key == NULL && (m->m_flags & M_WEP) == 0) &&
+			    (key == NULL && (M_GET_FLAGS(m) & M_WEP) == 0) &&
 			    eh->ether_type != htons(ETHERTYPE_PAE)) {
 				/*
 				 * Drop unencrypted frames.
@@ -929,7 +923,7 @@ hostap_auth_open(struct ieee80211_node *ni, struct ieee80211_frame *wh,
 {
 	struct ieee80211vap *vap = ni->ni_vap;
 
-	KASSERT(vap->iv_state == IEEE80211_S_RUN, ("state %d", vap->iv_state));
+	IASSERT(vap->iv_state == IEEE80211_S_RUN, ("state %d", vap->iv_state));
 
 	if (ni->ni_authmode == IEEE80211_AUTH_SHARED) {
 		IEEE80211_DISCARD_MAC(vap, IEEE80211_MSG_AUTH,
@@ -1008,9 +1002,9 @@ hostap_auth_shared(struct ieee80211_node *ni, struct ieee80211_frame *wh,
 {
 	struct ieee80211vap *vap = ni->ni_vap;
 	uint8_t *challenge;
-	int allocbs, estatus;
+	int allocbs __debugused, estatus;
 
-	KASSERT(vap->iv_state == IEEE80211_S_RUN, ("state %d", vap->iv_state));
+	IASSERT(vap->iv_state == IEEE80211_S_RUN, ("state %d", vap->iv_state));
 
 	/*
 	 * NB: this can happen as we allow pre-shared key
@@ -2178,7 +2172,7 @@ hostap_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 
 	case IEEE80211_FC0_SUBTYPE_DEAUTH:
 	case IEEE80211_FC0_SUBTYPE_DISASSOC: {
-		uint16_t reason;
+		uint16_t reason __debugused;
 
 		if (vap->iv_state != IEEE80211_S_RUN ||
 		    /* NB: can happen when in promiscuous mode */
@@ -2321,21 +2315,21 @@ ieee80211_recv_pspoll(struct ieee80211_node *ni, struct mbuf *m0)
 	if (qlen != 0) {
 		IEEE80211_NOTE(vap, IEEE80211_MSG_POWER, ni,
 		    "recv ps-poll, send packet, %u still queued", qlen);
-		m->m_flags |= M_MORE_DATA;
+		M_SET_FLAGS(m, M_MORE_DATA);
 	} else {
 		IEEE80211_NOTE(vap, IEEE80211_MSG_POWER, ni,
 		    "%s", "recv ps-poll, send packet, queue empty");
 		if (vap->iv_set_tim != NULL)
 			vap->iv_set_tim(ni, 0);
 	}
-	m->m_flags |= M_PWR_SAV;		/* bypass PS handling */
+	M_SET_FLAGS(m, M_PWR_SAV);		/* bypass PS handling */
 
 	/*
 	 * Do the right thing; if it's an encap'ed frame then
 	 * call ieee80211_parent_xmitpkt() (and free the ref) else
 	 * call ieee80211_vap_xmitpkt().
 	 */
-	if (m->m_flags & M_ENCAP) {
+	if (M_GET_FLAGS(m) & M_ENCAP) {
 		if (ieee80211_parent_xmitpkt(ic, m) != 0)
 			ieee80211_free_node(ni);
 	} else {

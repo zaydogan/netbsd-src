@@ -41,12 +41,12 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/param.h>
 #include <sys/systm.h> 
 #include <sys/kernel.h>
+#include <sys/mbuf.h>
  
 #include <sys/socket.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 
 #include <net80211/ieee80211_var.h>
 
@@ -68,7 +68,7 @@ ieee80211_ageq_init(struct ieee80211_ageq *aq, int maxlen, const char *name)
 void
 ieee80211_ageq_cleanup(struct ieee80211_ageq *aq)
 {
-	KASSERT(aq->aq_len == 0, ("%d frames on ageq", aq->aq_len));
+	IASSERT(aq->aq_len == 0, ("%d frames on ageq", aq->aq_len));
 	IEEE80211_AGEQ_DESTROY(aq);		/* OS-dependent cleanup */
 }
 
@@ -80,7 +80,7 @@ ieee80211_ageq_cleanup(struct ieee80211_ageq *aq)
 static void
 ageq_mfree(struct mbuf *m)
 {
-	if (m->m_flags & M_ENCAP) {
+	if (M_GET_FLAGS(m) & M_ENCAP) {
 		struct ieee80211_node *ni = (void *) m->m_pkthdr.rcvif;
 		ieee80211_free_node(ni);
 	}
@@ -118,7 +118,7 @@ ieee80211_ageq_append(struct ieee80211_ageq *aq, struct mbuf *m, int age)
 			aq->aq_tail->m_nextpkt = m;
 			age -= M_AGE_GET(aq->aq_head);
 		}
-		KASSERT(age >= 0, ("age %d", age));
+		IASSERT(age >= 0, ("age %d", age));
 		M_AGE_SET(m, age);
 		m->m_nextpkt = NULL;
 		aq->aq_tail = m;
@@ -175,7 +175,7 @@ ieee80211_ageq_age(struct ieee80211_ageq *aq, int quanta)
 		while ((m = aq->aq_head) != NULL && M_AGE_GET(m) < quanta) {
 			if ((aq->aq_head = m->m_nextpkt) == NULL)
 				aq->aq_tail = NULL;
-			KASSERT(aq->aq_len > 0, ("aq len %d", aq->aq_len));
+			IASSERT(aq->aq_len > 0, ("aq len %d", aq->aq_len));
 			aq->aq_len--;
 			/* add to private list for return */
 			*phead = m;
@@ -213,15 +213,15 @@ ieee80211_ageq_remove(struct ieee80211_ageq *aq,
 		/*
 		 * Adjust q length.
 		 */
-		KASSERT(aq->aq_len > 0, ("aq len %d", aq->aq_len));
+		IASSERT(aq->aq_len > 0, ("aq len %d", aq->aq_len));
 		aq->aq_len--;
 		/*
 		 * Remove from forward list; tail pointer is harder.
 		 */
 		if (aq->aq_tail == m) {
-			KASSERT(m->m_nextpkt == NULL, ("not last"));
+			IASSERT(m->m_nextpkt == NULL, ("not last"));
 			if (aq->aq_head == m) {		/* list empty */
-				KASSERT(aq->aq_len == 0,
+				IASSERT(aq->aq_len == 0,
 				    ("not empty, len %d", aq->aq_len));
 				aq->aq_tail = NULL;
 			} else {			/* must be one before */

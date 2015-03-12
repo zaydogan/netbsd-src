@@ -54,8 +54,6 @@ static const char *ratectl_modnames[IEEE80211_RATECTL_MAX] = {
 	[IEEE80211_RATECTL_NONE]	= "wlan_none",
 };
 
-MALLOC_DEFINE(M_80211_RATECTL, "80211ratectl", "802.11 rate control");
-
 void
 ieee80211_ratectl_register(int type, const struct ieee80211_ratectl *ratectl)
 {

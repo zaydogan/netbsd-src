@@ -46,7 +46,6 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/socket.h>
  
 #include <net/bpf.h>
-#include <net/ethernet.h>
 #include <net/if.h>
 #include <net/if_llc.h>
 #include <net/if_media.h>
@@ -262,7 +261,7 @@ ieee80211_ff_decap(struct ieee80211_node *ni, struct mbuf *m)
 	int framelen;
 
 	/* NB: we assume caller does this check for us */
-	KASSERT(IEEE80211_ATH_CAP(vap, ni, IEEE80211_NODE_FF),
+	IASSERT(IEEE80211_ATH_CAP(vap, ni, IEEE80211_NODE_FF),
 	    ("ff not negotiated"));
 	/*
 	 * Check for fast-frame tunnel encapsulation.
@@ -362,7 +361,7 @@ ieee80211_ff_encap(struct ieee80211vap *vap, struct mbuf *m1, int hdrspace,
 	/*
 	 * Include fast frame headers in adjusting header layout.
 	 */
-	KASSERT(m1->m_len >= sizeof(eh1), ("no ethernet header!"));
+	IASSERT(m1->m_len >= sizeof(eh1), ("no ethernet header!"));
 	ETHER_HEADER_COPY(&eh1, mtod(m1, caddr_t));
 	m1 = ieee80211_mbuf_adjust(vap,
 		hdrspace + sizeof(struct llc) + sizeof(uint32_t) + 2 +
@@ -380,7 +379,7 @@ ieee80211_ff_encap(struct ieee80211vap *vap, struct mbuf *m1, int hdrspace,
 	 * we make room for padding in case there isn't room
 	 * at the end of first frame.
 	 */
-	KASSERT(m2->m_len >= sizeof(eh2), ("no ethernet header!"));
+	IASSERT(m2->m_len >= sizeof(eh2), ("no ethernet header!"));
 	ETHER_HEADER_COPY(&eh2, mtod(m2, caddr_t));
 	m2 = ieee80211_mbuf_adjust(vap,
 		ATH_FF_MAX_HDR_PAD + sizeof(struct ether_header),
@@ -539,7 +538,7 @@ ieee80211_ff_age(struct ieee80211com *ic, struct ieee80211_stageq *sq,
 	struct ieee80211_tx_ampdu *tap;
 
 #if 0
-	KASSERT(sq->head != NULL, ("stageq empty"));
+	IASSERT(sq->head != NULL, ("stageq empty"));
 #endif
 
 	IEEE80211_LOCK(ic);
@@ -550,7 +549,7 @@ ieee80211_ff_age(struct ieee80211com *ic, struct ieee80211_stageq *sq,
 		/* clear tap ref to frame */
 		ni = (struct ieee80211_node *) m->m_pkthdr.rcvif;
 		tap = &ni->ni_tx_ampdu[tid];
-		KASSERT(tap->txa_private == m, ("staging queue empty"));
+		IASSERT(tap->txa_private == m, ("staging queue empty"));
 		tap->txa_private = NULL;
 
 		sq->head = m->m_nextpkt;
@@ -579,7 +578,7 @@ stageq_add(struct ieee80211com *ic, struct ieee80211_stageq *sq, struct mbuf *m)
 		age -= M_AGE_GET(sq->head);
 	} else
 		sq->head = m;
-	KASSERT(age >= 0, ("age %d", age));
+	IASSERT(age >= 0, ("age %d", age));
 	M_AGE_SET(m, age);
 	m->m_nextpkt = NULL;
 	sq->tail = m;
@@ -737,15 +736,15 @@ ieee80211_ff_check(struct ieee80211_node *ni, struct mbuf *m)
 		 * Release the node reference; we only need
 		 * the one already in mstaged.
 		 */
-		KASSERT(mstaged->m_pkthdr.rcvif == (void *)ni,
+		IASSERT(mstaged->m_pkthdr.rcvif == (void *)ni,
 		    ("rcvif %p ni %p", mstaged->m_pkthdr.rcvif, ni));
 		ieee80211_free_node(ni);
 
 		m->m_nextpkt = NULL;
 		mstaged->m_nextpkt = m;
-		mstaged->m_flags |= M_FF; /* NB: mark for encap work */
+		M_SET_FLAGS(mstaged, M_FF); /* NB: mark for encap work */
 	} else {
-		KASSERT(tap->txa_private == NULL,
+		IASSERT(tap->txa_private == NULL,
 		    ("txa_private %p", tap->txa_private));
 		tap->txa_private = m;
 

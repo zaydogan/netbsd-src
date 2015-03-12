@@ -45,11 +45,11 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_input.c,v 1.78 2014/10/18 08:33:29 snj Exp
  
 #include <sys/socket.h>
  
-#include <net/ethernet.h>
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_llc.h>
 #include <net/if_media.h>
-#include <net/if_vlan_var.h>
+#include <net/if_vlanvar.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_input.h>
@@ -61,7 +61,6 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_input.c,v 1.78 2014/10/18 08:33:29 snj Exp
 
 #ifdef INET
 #include <netinet/in.h>
-#include <net/ethernet.h>
 #endif
 
 static void
@@ -115,7 +114,7 @@ ieee80211_input_mimo_all(struct ieee80211com *ic, struct mbuf *m,
 	struct ieee80211vap *vap;
 	int type = -1;
 
-	m->m_flags |= M_BCAST;		/* NB: mark for bpf tap'ing */
+	M_SET_FLAGS(m, M_BCAST);		/* NB: mark for bpf tap'ing */
 
 	/* XXX locking */
 	TAILQ_FOREACH(vap, &ic->ic_vaps, iv_next) {
@@ -138,7 +137,7 @@ ieee80211_input_mimo_all(struct ieee80211com *ic, struct mbuf *m,
 			 * Packet contents are changed by ieee80211_decap
 			 * so do a deep copy of the packet.
 			 */
-			mcopy = m_dup(m, M_NOWAIT);
+			mcopy = m_dup(m, 0, M_COPYALL, M_NOWAIT);
 			if (mcopy == NULL) {
 				/* XXX stat+msg */
 				continue;
@@ -172,7 +171,7 @@ ieee80211_defrag(struct ieee80211_node *ni, struct mbuf *m, int hdrspace)
 	uint8_t more_frag = wh->i_fc[1] & IEEE80211_FC1_MORE_FRAG;
 	struct mbuf *mfrag;
 
-	KASSERT(!IEEE80211_IS_MULTICAST(wh->i_addr1), ("multicast fragm?"));
+	IASSERT(!IEEE80211_IS_MULTICAST(wh->i_addr1), ("multicast fragm?"));
 
 	rxseq = le16toh(*(uint16_t *)wh->i_seq);
 	fragno = rxseq & IEEE80211_SEQ_FRAG_MASK;
@@ -257,13 +256,10 @@ ieee80211_deliver_data(struct ieee80211vap *vap,
 	struct ifnet *ifp = vap->iv_ifp;
 
 	/* clear driver/net80211 flags before passing up */
-	m->m_flags &= ~(M_MCAST | M_BCAST);
-#if __FreeBSD_version >= 1000046
-	m_clrprotoflags(m);
-#endif
+	M_CLR_FLAGS(m, M_MCAST | M_BCAST);
 
 	/* NB: see hostap_deliver_data, this path doesn't handle hostap */
-	KASSERT(vap->iv_opmode != IEEE80211_M_HOSTAP, ("gack, hostap"));
+	IASSERT(vap->iv_opmode != IEEE80211_M_HOSTAP, ("gack, hostap"));
 	/*
 	 * Do accounting.
 	 */
@@ -271,7 +267,7 @@ ieee80211_deliver_data(struct ieee80211vap *vap,
 	IEEE80211_NODE_STAT(ni, rx_data);
 	IEEE80211_NODE_STAT_ADD(ni, rx_bytes, m->m_pkthdr.len);
 	if (ETHER_IS_MULTICAST(eh->ether_dhost)) {
-		m->m_flags |= M_MCAST;		/* XXX M_BCAST? */
+		M_SET_FLAGS(m, M_MCAST);		/* XXX M_BCAST? */
 		IEEE80211_NODE_STAT(ni, rx_mcast);
 	} else
 		IEEE80211_NODE_STAT(ni, rx_ucast);
@@ -279,8 +275,7 @@ ieee80211_deliver_data(struct ieee80211vap *vap,
 
 	if (ni->ni_vlan != 0) {
 		/* attach vlan tag */
-		m->m_pkthdr.ether_vtag = ni->ni_vlan;
-		m->m_flags |= M_VLANTAG;
+		VLAN_INPUT_TAG(ifp, m, ni->ni_vlan, return);
 	}
 	ifp->if_input(ifp, m);
 }
@@ -292,7 +287,7 @@ ieee80211_decap(struct ieee80211vap *vap, struct mbuf *m, int hdrlen)
 	struct ether_header *eh;
 	struct llc *llc;
 
-	KASSERT(hdrlen <= sizeof(wh),
+	IASSERT(hdrlen <= sizeof(wh),
 	    ("hdrlen %d > max %zd", hdrlen, sizeof(wh)));
 
 	if (m->m_len < hdrlen + sizeof(*llc) &&
@@ -301,8 +296,8 @@ ieee80211_decap(struct ieee80211vap *vap, struct mbuf *m, int hdrlen)
 		/* XXX msg */
 		return NULL;
 	}
-	memcpy(&wh, mtod(m, caddr_t), hdrlen);
-	llc = (struct llc *)(mtod(m, caddr_t) + hdrlen);
+	memcpy(&wh, mtod(m, char *), hdrlen);
+	llc = (struct llc *)(mtod(m, char *) + hdrlen);
 	if (llc->llc_dsap == LLC_SNAP_LSAP && llc->llc_ssap == LLC_SNAP_LSAP &&
 	    llc->llc_control == LLC_UI && llc->llc_snap.org_code[0] == 0 &&
 	    llc->llc_snap.org_code[1] == 0 && llc->llc_snap.org_code[2] == 0 &&

@@ -216,7 +216,7 @@ ieee80211_radiotap_tx(struct ieee80211vap *vap0, struct mbuf *m)
 	struct ieee80211_radiotap_header *th = ic->ic_th;
 	int len;
 
-	KASSERT(th != NULL, ("no tx radiotap header"));
+	IASSERT(th != NULL, ("no tx radiotap header"));
 	len = le16toh(th->it_len);
 
 	if (vap0->iv_flags_ext & IEEE80211_FEXT_BPF)
@@ -238,7 +238,7 @@ ieee80211_radiotap_rx(struct ieee80211vap *vap0, struct mbuf *m)
 	struct ieee80211_radiotap_header *rh = ic->ic_rh;
 	int len;
 
-	KASSERT(rh != NULL, ("no rx radiotap header"));
+	IASSERT(rh != NULL, ("no rx radiotap header"));
 	len = le16toh(rh->it_len);
 
 	if (vap0->iv_flags_ext & IEEE80211_FEXT_BPF)
@@ -248,7 +248,7 @@ ieee80211_radiotap_rx(struct ieee80211vap *vap0, struct mbuf *m)
 	 * frames are handled by passing through ieee80211_input_all
 	 * which distributes copies to the monitor mode vaps.
 	 */
-	if (ic->ic_montaps != 0 && (m->m_flags & M_BCAST) == 0)
+	if (ic->ic_montaps != 0 && (M_GET_FLAGS(m) & M_BCAST) == 0)
 		spam_vaps(vap0, m, rh, len);
 }
 

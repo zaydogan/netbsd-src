@@ -57,16 +57,18 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <net80211/ieee80211_var.h>
 
-static MALLOC_DEFINE(M_80211_DFS, "80211dfs", "802.11 DFS state");
-
 static	int ieee80211_nol_timeout = 30*60;		/* 30 minutes */
+#ifdef notyet	/* XXX FBSD80211 sysctl */
 SYSCTL_INT(_net_wlan, OID_AUTO, nol_timeout, CTLFLAG_RW,
 	&ieee80211_nol_timeout, 0, "NOL timeout (secs)");
+#endif
 #define	NOL_TIMEOUT	msecs_to_ticks(ieee80211_nol_timeout*1000)
 
 static	int ieee80211_cac_timeout = 60;		/* 60 seconds */
+#ifdef notyet	/* XXX FBSD80211 sysctl */
 SYSCTL_INT(_net_wlan, OID_AUTO, cac_timeout, CTLFLAG_RW,
 	&ieee80211_cac_timeout, 0, "CAC timeout (secs)");
+#endif
 #define	CAC_TIMEOUT	msecs_to_ticks(ieee80211_cac_timeout*1000)
 
 /*
@@ -102,8 +104,8 @@ ieee80211_dfs_attach(struct ieee80211com *ic)
 {
 	struct ieee80211_dfs_state *dfs = &ic->ic_dfs;
 
-	callout_init_mtx(&dfs->nol_timer, IEEE80211_LOCK_OBJ(ic), 0);
-	callout_init_mtx(&dfs->cac_timer, IEEE80211_LOCK_OBJ(ic), 0);
+	callout_init(&dfs->nol_timer, 0);
+	callout_init(&dfs->cac_timer, 0);
 
 	ic->ic_set_quiet = null_set_quiet;
 }
@@ -123,7 +125,13 @@ ieee80211_dfs_reset(struct ieee80211com *ic)
 
 	/* NB: we assume no locking is needed */
 	/* NB: cac_timer should be cleared by the state machine */
+#ifdef notyet	/* XXX FBSD80211 callout drain */
 	callout_drain(&dfs->nol_timer);
+#else
+	IEEE80211_LOCK(ic);	/* XXX */
+	callout_stop(&dfs->nol_timer);
+	IEEE80211_UNLOCK(ic);	/* XXX */
+#endif
 	for (i = 0; i < ic->ic_nchans; i++)
 		ic->ic_channels[i].ic_state = 0;
 	dfs->lastchan = NULL;
@@ -137,10 +145,10 @@ cac_timeout(void *arg)
 	struct ieee80211_dfs_state *dfs = &ic->ic_dfs;
 	int i;
 
-	IEEE80211_LOCK_ASSERT(ic);
+	IEEE80211_LOCK(ic);
 
 	if (vap->iv_state != IEEE80211_S_CAC)	/* NB: just in case */
-		return;
+		goto out;
 	/*
 	 * When radar is detected during a CAC we are woken
 	 * up prematurely to switch to a new channel.
@@ -178,6 +186,9 @@ cac_timeout(void *arg)
 		    IEEE80211_NOTIFY_CAC_EXPIRE);
 		ieee80211_cac_completeswitch(vap);
 	}
+
+ out:
+	IEEE80211_UNLOCK(ic);
 }
 
 /*
@@ -242,7 +253,7 @@ dfs_timeout(void *arg)
 	struct ieee80211_channel *c;
 	int i, oldest, now;
 
-	IEEE80211_LOCK_ASSERT(ic);
+	IEEE80211_LOCK(ic);
 
 	now = oldest = ticks;
 	for (i = 0; i < ic->ic_nchans; i++) {
@@ -272,6 +283,8 @@ dfs_timeout(void *arg)
 		/* arrange to process next channel up for a status change */
 		callout_schedule(&dfs->nol_timer, oldest + NOL_TIMEOUT - now);
 	}
+
+	IEEE80211_UNLOCK(ic);
 }
 
 static void

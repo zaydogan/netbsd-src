@@ -48,7 +48,6 @@ __FBSDID("$FreeBSD$");
 #include <net/if_clone.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
-#include <net/ethernet.h>
 #include <net/route.h>
 #include <net/vnet.h>
 
@@ -345,7 +344,7 @@ ieee80211_drain_ifq(struct ifqueue *ifq)
 			break;
 
 		ni = (struct ieee80211_node *)m->m_pkthdr.rcvif;
-		KASSERT(ni != NULL, ("frame w/o node"));
+		IASSERT(ni != NULL, ("frame w/o node"));
 		ieee80211_free_node(ni);
 		m->m_pkthdr.rcvif = NULL;
 
@@ -409,7 +408,7 @@ ieee80211_getmgtframe(uint8_t **frm, int headroom, int pktlen)
 	 *     so we don't need to do anything special.
 	 */
 	len = roundup2(headroom + pktlen, 4);
-	KASSERT(len <= MCLBYTES, ("802.11 mgt frame too large: %u", len));
+	IASSERT(len <= MCLBYTES, ("802.11 mgt frame too large: %u", len));
 	if (len < MINCLSIZE) {
 		m = m_gethdr(M_NOWAIT, MT_DATA);
 		/*

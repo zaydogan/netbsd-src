@@ -913,6 +913,10 @@ struct	m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 						    * loop detection/recovery
 						    */
 
+#define	PACKET_TAG_IEEE80211_MBUF_FLAGS		30 /* 802.11 mbuf flags */
+
+#define	PACKET_TAG_IEEE80211_WME_AC		31 /* 802.11 WME AC */
+
 /*
  * Return the number of bytes in the mbuf chain, m.
  */

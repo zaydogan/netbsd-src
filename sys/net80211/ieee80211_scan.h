@@ -251,7 +251,6 @@ struct ieee80211_scan_entry {
 	struct ieee80211_ies se_ies;	/* captured ie's */
 	u_int		se_age;		/* age of entry (0 on create) */
 };
-MALLOC_DECLARE(M_80211_SCAN);
 
 /*
  * Template for an in-kernel scan policy module.

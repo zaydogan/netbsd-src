@@ -86,8 +86,147 @@ struct ieee80211_nodestats {
 	uint32_t	ns_tx_deauth_code;	/* last deauth reason */
 	uint32_t	ns_tx_disassoc;		/* disassociations */
 	uint32_t	ns_tx_disassoc_code;	/* last disassociation reason */
-	uint32_t	ns_spare[8];
 };
+
+#ifdef COMPAT_20
+struct ieee80211_ostats {
+	u_int32_t	is_rx_badversion;	/* rx frame with bad version */
+	u_int32_t	is_rx_tooshort;		/* rx frame too short */
+	u_int32_t	is_rx_wrongbss;		/* rx from wrong bssid */
+	u_int32_t	is_rx_dup;		/* rx discard 'cuz dup */
+	u_int32_t	is_rx_wrongdir;		/* rx w/ wrong direction */
+	u_int32_t	is_rx_mcastecho;	/* rx discard 'cuz mcast echo */
+	u_int32_t	is_rx_notassoc;		/* rx discard 'cuz sta !assoc */
+	u_int32_t	is_rx_nowep;		/* rx w/ wep but wep !config */
+	u_int32_t	is_rx_wepfail;		/* rx wep processing failed */
+	u_int32_t	is_rx_decap;		/* rx decapsulation failed */
+	u_int32_t	is_rx_mgtdiscard;	/* rx discard mgt frames */
+	u_int32_t	is_rx_ctl;		/* rx discard ctrl frames */
+	u_int32_t	is_rx_rstoobig;		/* rx rate set truncated */
+	u_int32_t	is_rx_elem_missing;	/* rx required element missing*/
+	u_int32_t	is_rx_elem_toobig;	/* rx element too big */
+	u_int32_t	is_rx_elem_toosmall;	/* rx element too small */
+	u_int32_t	is_rx_elem_unknown;	/* rx element unknown */
+	u_int32_t	is_rx_badchan;		/* rx frame w/ invalid chan */
+	u_int32_t	is_rx_chanmismatch;	/* rx frame chan mismatch */
+	u_int32_t	is_rx_nodealloc;	/* rx frame dropped */
+	u_int32_t	is_rx_ssidmismatch;	/* rx frame ssid mismatch  */
+	u_int32_t	is_rx_auth_unsupported;	/* rx w/ unsupported auth alg */
+	u_int32_t	is_rx_auth_fail;	/* rx sta auth failure */
+	u_int32_t	is_rx_assoc_bss;	/* rx assoc from wrong bssid */
+	u_int32_t	is_rx_assoc_notauth;	/* rx assoc w/o auth */
+	u_int32_t	is_rx_assoc_capmismatch;/* rx assoc w/ cap mismatch */
+	u_int32_t	is_rx_assoc_norate;	/* rx assoc w/ no rate match */
+	u_int32_t	is_rx_deauth;		/* rx deauthentication */
+	u_int32_t	is_rx_disassoc;		/* rx disassociation */
+	u_int32_t	is_rx_badsubtype;	/* rx frame w/ unknown subtype*/
+	u_int32_t	is_rx_nombuf;		/* rx failed for lack of mbuf */
+	u_int32_t	is_rx_decryptcrc;	/* rx decrypt failed on crc */
+	u_int32_t	is_rx_ahdemo_mgt;	/* rx discard ahdemo mgt frame*/
+	u_int32_t	is_rx_bad_auth;		/* rx bad auth request */
+	u_int32_t	is_tx_nombuf;		/* tx failed for lack of mbuf */
+	u_int32_t	is_tx_nonode;		/* tx failed for no node */
+	u_int32_t	is_tx_unknownmgt;	/* tx of unknown mgt frame */
+	u_int32_t	is_scan_active;		/* active scans started */
+	u_int32_t	is_scan_passive;	/* passive scans started */
+	u_int32_t	is_node_timeout;	/* nodes timed out inactivity */
+	u_int32_t	is_crypto_nomem;	/* no memory for crypto ctx */
+};
+#endif /* COMPAT_20 */
+
+#ifdef COMPAT_70
+struct ieee80211_stats70 {
+	u_int32_t	is_rx_badversion;	/* rx frame with bad version */
+	u_int32_t	is_rx_tooshort;		/* rx frame too short */
+	u_int32_t	is_rx_wrongbss;		/* rx from wrong bssid */
+	u_int32_t	is_rx_dup;		/* rx discard 'cuz dup */
+	u_int32_t	is_rx_wrongdir;		/* rx w/ wrong direction */
+	u_int32_t	is_rx_mcastecho;	/* rx discard 'cuz mcast echo */
+	u_int32_t	is_rx_notassoc;		/* rx discard 'cuz sta !assoc */
+	u_int32_t	is_rx_noprivacy;	/* rx w/ wep but privacy off */
+	u_int32_t	is_rx_unencrypted;	/* rx w/o wep and privacy on */
+	u_int32_t	is_rx_wepfail;		/* rx wep processing failed */
+	u_int32_t	is_rx_decap;		/* rx decapsulation failed */
+	u_int32_t	is_rx_mgtdiscard;	/* rx discard mgt frames */
+	u_int32_t	is_rx_ctl;		/* rx discard ctrl frames */
+	u_int32_t	is_rx_beacon;		/* rx beacon frames */
+	u_int32_t	is_rx_rstoobig;		/* rx rate set truncated */
+	u_int32_t	is_rx_elem_missing;	/* rx required element missing*/
+	u_int32_t	is_rx_elem_toobig;	/* rx element too big */
+	u_int32_t	is_rx_elem_toosmall;	/* rx element too small */
+	u_int32_t	is_rx_elem_unknown;	/* rx element unknown */
+	u_int32_t	is_rx_badchan;		/* rx frame w/ invalid chan */
+	u_int32_t	is_rx_chanmismatch;	/* rx frame chan mismatch */
+	u_int32_t	is_rx_nodealloc;	/* rx frame dropped */
+	u_int32_t	is_rx_ssidmismatch;	/* rx frame ssid mismatch  */
+	u_int32_t	is_rx_auth_unsupported;	/* rx w/ unsupported auth alg */
+	u_int32_t	is_rx_auth_fail;	/* rx sta auth failure */
+	u_int32_t	is_rx_auth_countermeasures;/* rx auth discard 'cuz CM */
+	u_int32_t	is_rx_assoc_bss;	/* rx assoc from wrong bssid */
+	u_int32_t	is_rx_assoc_notauth;	/* rx assoc w/o auth */
+	u_int32_t	is_rx_assoc_capmismatch;/* rx assoc w/ cap mismatch */
+	u_int32_t	is_rx_assoc_norate;	/* rx assoc w/ no rate match */
+	u_int32_t	is_rx_assoc_badwpaie;	/* rx assoc w/ bad WPA IE */
+	u_int32_t	is_rx_deauth;		/* rx deauthentication */
+	u_int32_t	is_rx_disassoc;		/* rx disassociation */
+	u_int32_t	is_rx_badsubtype;	/* rx frame w/ unknown subtype*/
+	u_int32_t	is_rx_nobuf;		/* rx failed for lack of buf */
+	u_int32_t	is_rx_decryptcrc;	/* rx decrypt failed on crc */
+	u_int32_t	is_rx_ahdemo_mgt;	/* rx discard ahdemo mgt frame*/
+	u_int32_t	is_rx_bad_auth;		/* rx bad auth request */
+	u_int32_t	is_rx_unauth;		/* rx on unauthorized port */
+	u_int32_t	is_rx_badkeyid;		/* rx w/ incorrect keyid */
+	u_int32_t	is_rx_ccmpreplay;	/* rx seq# violation (CCMP) */
+	u_int32_t	is_rx_ccmpformat;	/* rx format bad (CCMP) */
+	u_int32_t	is_rx_ccmpmic;		/* rx MIC check failed (CCMP) */
+	u_int32_t	is_rx_tkipreplay;	/* rx seq# violation (TKIP) */
+	u_int32_t	is_rx_tkipformat;	/* rx format bad (TKIP) */
+	u_int32_t	is_rx_tkipmic;		/* rx MIC check failed (TKIP) */
+	u_int32_t	is_rx_tkipicv;		/* rx ICV check failed (TKIP) */
+	u_int32_t	is_rx_badcipher;	/* rx failed 'cuz key type */
+	u_int32_t	is_rx_nocipherctx;	/* rx failed 'cuz key !setup */
+	u_int32_t	is_rx_acl;		/* rx discard 'cuz acl policy */
+	u_int32_t	is_tx_nobuf;		/* tx failed for lack of buf */
+	u_int32_t	is_tx_nonode;		/* tx failed for no node */
+	u_int32_t	is_tx_unknownmgt;	/* tx of unknown mgt frame */
+	u_int32_t	is_tx_badcipher;	/* tx failed 'cuz key type */
+	u_int32_t	is_tx_nodefkey;		/* tx failed 'cuz no defkey */
+	u_int32_t	is_tx_noheadroom;	/* tx failed 'cuz no space */
+	u_int32_t	is_tx_fragframes;	/* tx frames fragmented */
+	u_int32_t	is_tx_frags;		/* tx fragments created */
+	u_int32_t	is_scan_active;		/* active scans started */
+	u_int32_t	is_scan_passive;	/* passive scans started */
+	u_int32_t	is_node_timeout;	/* nodes timed out inactivity */
+	u_int32_t	is_crypto_nomem;	/* no memory for crypto ctx */
+	u_int32_t	is_crypto_tkip;		/* tkip crypto done in s/w */
+	u_int32_t	is_crypto_tkipenmic;	/* tkip en-MIC done in s/w */
+	u_int32_t	is_crypto_tkipdemic;	/* tkip de-MIC done in s/w */
+	u_int32_t	is_crypto_tkipcm;	/* tkip counter measures */
+	u_int32_t	is_crypto_ccmp;		/* ccmp crypto done in s/w */
+	u_int32_t	is_crypto_wep;		/* wep crypto done in s/w */
+	u_int32_t	is_crypto_setkey_cipher;/* cipher rejected key */
+	u_int32_t	is_crypto_setkey_nokey;	/* no key index for setkey */
+	u_int32_t	is_crypto_delkey;	/* driver key delete failed */
+	u_int32_t	is_crypto_badcipher;	/* unknown cipher */
+	u_int32_t	is_crypto_nocipher;	/* cipher not available */
+	u_int32_t	is_crypto_attachfail;	/* cipher attach failed */
+	u_int32_t	is_crypto_swfallback;	/* cipher fallback to s/w */
+	u_int32_t	is_crypto_keyfail;	/* driver key alloc failed */
+	u_int32_t	is_crypto_enmicfail;	/* en-MIC failed */
+	u_int32_t	is_ibss_capmismatch;	/* merge failed-cap mismatch */
+	u_int32_t	is_ibss_norate;		/* merge failed-rate mismatch */
+	u_int32_t	is_ps_unassoc;		/* ps-poll for unassoc. sta */
+	u_int32_t	is_ps_badaid;		/* ps-poll w/ incorrect aid */
+	u_int32_t	is_ps_qempty;		/* ps-poll w/ nothing to send */
+	u_int32_t	is_ff_badhdr;		/* fast frame rx'd w/ bad hdr */
+	u_int32_t	is_ff_tooshort;		/* fast frame rx decap error */
+	u_int32_t	is_ff_split;		/* fast frame rx split error */
+	u_int32_t	is_ff_decap;		/* fast frames decap'd */
+	u_int32_t	is_ff_encap;		/* fast frames encap'd for tx */
+	u_int32_t	is_rx_badbintval;	/* rx frame w/ bogus bintval */
+	u_int32_t	is_spare[9];
+};
+#endif /* COMPAT_70 */
 
 /*
  * Summary statistics.
@@ -577,7 +716,6 @@ struct ieee80211req_sta_vlan {
 	uint16_t	sv_vlan;
 };
 
-#ifdef __FreeBSD__
 /*
  * FreeBSD-style ioctls.
  */
@@ -589,23 +727,47 @@ struct ieee80211req {
 	uint16_t	i_len;			/* Index or simple value */
 	void		*i_data;		/* Extra data */
 };
+#ifdef __FreeBSD__
 #define	SIOCS80211		 _IOW('i', 234, struct ieee80211req)
 #define	SIOCG80211		_IOWR('i', 235, struct ieee80211req)
 #define	SIOCG80211STATS		_IOWR('i', 236, struct ifreq)
+#endif
+#ifdef __NetBSD__
+#define	SIOCS80211		 _IOW('i', 244, struct ieee80211req)
+#define	SIOCG80211		_IOWR('i', 245, struct ieee80211req)
+#define	SIOCG80211STATS		_IOWR('i', 248, struct ifreq)	/* XXX FBSD80211 new stat struct ioctl#? */
+#define	SIOCG80211ZSTATS	_IOWR('i', 249, struct ifreq)	/* XXX FBSD80211 new stat struct ioctl#? */
+#ifdef COMPAT_20
+#define	OOSIOCG80211STATS	_IOWR('i', 242, struct ifreq)
+#define	OOSIOCG80211ZSTATS	_IOWR('i', 243, struct ifreq)
+#endif /* COMPAT_20 */
+#ifdef COMPAT_70
+#define	OSIOCG80211STATS	_IOWR('i', 246, struct ifreq)
+#define	OSIOCG80211ZSTATS	_IOWR('i', 247, struct ifreq)
+#endif /* COMPAT_70 */
+#endif /* __NetBSD__ */
 
+#if defined(__FreeBSD__) || defined(COMPAT_FREEBSD_NET80211)
 #define IEEE80211_IOC_SSID		1
+#endif /* __FreeBSD__ || COMPAT_FREEBSD_NET80211 */
 #define IEEE80211_IOC_NUMSSIDS		2
 #define IEEE80211_IOC_WEP		3
 #define 	IEEE80211_WEP_NOSUP	-1
 #define 	IEEE80211_WEP_OFF	0
 #define 	IEEE80211_WEP_ON	1
 #define 	IEEE80211_WEP_MIXED	2
+#if defined(__FreeBSD__) || defined(COMPAT_FREEBSD_NET80211)
 #define IEEE80211_IOC_WEPKEY		4
+#endif /* __FreeBSD__ || COMPAT_FREEBSD_NET80211 */
 #define IEEE80211_IOC_NUMWEPKEYS	5
+#if defined(__FreeBSD__) || defined(COMPAT_FREEBSD_NET80211)
 #define IEEE80211_IOC_WEPTXKEY		6
+#endif /* __FreeBSD__ || COMPAT_FREEBSD_NET80211 */
 #define IEEE80211_IOC_AUTHMODE		7
 #define IEEE80211_IOC_STATIONNAME	8
+#if defined(__FreeBSD__) || defined(COMPAT_FREEBSD_NET80211)
 #define IEEE80211_IOC_CHANNEL		9
+#endif /* __FreeBSD__ || COMPAT_FREEBSD_NET80211 */
 #define IEEE80211_IOC_POWERSAVE		10
 #define 	IEEE80211_POWERSAVE_NOSUP	-1
 #define 	IEEE80211_POWERSAVE_OFF		0
@@ -620,7 +782,9 @@ struct ieee80211req {
 #define 	IEEE80211_PROTMODE_CTS		1
 #define 	IEEE80211_PROTMODE_RTSCTS	2
 #define	IEEE80211_IOC_TXPOWER		14	/* global tx power limit */
+#if defined(__FreeBSD__) || defined(COMPAT_FREEBSD_NET80211)
 #define	IEEE80211_IOC_BSSID		15
+#endif /* __FreeBSD__ || COMPAT_FREEBSD_NET80211 */
 #define	IEEE80211_IOC_ROAMING		16	/* roaming mode */
 #define	IEEE80211_IOC_PRIVACY		17	/* privacy invoked */
 #define	IEEE80211_IOC_DROPUNENCRYPTED	18	/* discard unencrypted frames */
@@ -816,6 +980,99 @@ struct ieee80211req_scan_result {
 	  followed by IE data */
 };
 
+#ifdef __NetBSD__
+
+/*
+ * Scan result data returned for IEEE80211_IOC_OSCAN_RESULTS.
+ */
+struct ieee80211req_oscan_result {
+	u_int16_t	isr_len;		/* length (mult of 4) */
+	u_int16_t	isr_freq;		/* MHz */
+	u_int16_t	isr_flags;		/* channel flags */
+	u_int8_t	isr_noise;
+	u_int8_t	isr_rssi;
+	u_int8_t	isr_intval;		/* beacon interval */
+	u_int8_t	isr_capinfo;		/* capabilities */
+	u_int8_t	isr_erp;		/* ERP element */
+	u_int8_t	isr_bssid[IEEE80211_ADDR_LEN];
+	u_int8_t	isr_nrates;
+	u_int8_t	isr_rates[IEEE80211_RATE_MAXSIZE];
+	u_int8_t	isr_ssid_len;		/* SSID length */
+	u_int8_t	isr_ie_len;		/* IE length */
+	u_int8_t	isr_pad[5];
+	/* variable length SSID followed by IE data */
+};
+
+/* nwid is pointed at by ifr.ifr_data */
+struct ieee80211_nwid {
+	u_int8_t	i_len;
+	u_int8_t	i_nwid[IEEE80211_NWID_LEN];
+};
+
+#define	SIOCS80211NWID		_IOWR('i', 230, struct ifreq)
+#define	SIOCG80211NWID		_IOWR('i', 231, struct ifreq)
+
+/* the first member must be matched with struct ifreq */
+struct ieee80211_nwkey {
+	char		i_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	int		i_wepon;		/* wep enabled flag */
+	int		i_defkid;		/* default encrypt key id */
+	struct {
+		int		i_keylen;
+		u_int8_t	*i_keydat;
+	}		i_key[IEEE80211_WEP_NKID];
+};
+#define	SIOCS80211NWKEY		 _IOW('i', 232, struct ieee80211_nwkey)
+#define	SIOCG80211NWKEY		_IOWR('i', 233, struct ieee80211_nwkey)
+/* i_wepon */
+#define	IEEE80211_NWKEY_OPEN	0		/* No privacy */
+#define	IEEE80211_NWKEY_WEP	1		/* WEP enabled */
+#define	IEEE80211_NWKEY_EAP	2		/* EAP enabled */
+#define	IEEE80211_NWKEY_PERSIST	0x100		/* designate persist keyset */
+
+/* power management parameters */
+struct ieee80211_power {
+	char		i_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	int		i_enabled;		/* 1 == on, 0 == off */
+	int		i_maxsleep;		/* max sleep in ms */
+};
+#define	SIOCS80211POWER		 _IOW('i', 234, struct ieee80211_power)
+#define	SIOCG80211POWER		_IOWR('i', 235, struct ieee80211_power)
+
+struct ieee80211_auth {
+	char		i_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	int		i_authtype;
+};
+
+#define	IEEE80211_AUTH_NONE	0
+#define	IEEE80211_AUTH_OPEN	1
+#define	IEEE80211_AUTH_SHARED	2
+
+#define	SIOCS80211AUTH		 _IOW('i', 236, struct ieee80211_auth)
+#define	SIOCG80211AUTH		_IOWR('i', 237, struct ieee80211_auth)
+
+struct ieee80211chanreq {
+	char		i_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	u_int16_t	i_channel;
+};
+
+#ifndef IEEE80211_CHAN_ANY
+#define	IEEE80211_CHAN_ANY	0xffff
+#endif
+
+#define	SIOCS80211CHANNEL	 _IOW('i', 238, struct ieee80211chanreq)
+#define	SIOCG80211CHANNEL	_IOWR('i', 239, struct ieee80211chanreq)
+
+struct ieee80211_bssid {
+	char		i_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	u_int8_t	i_bssid[IEEE80211_ADDR_LEN];
+};
+
+#define	SIOCS80211BSSID		 _IOW('i', 240, struct ieee80211_bssid)
+#define	SIOCG80211BSSID		_IOWR('i', 241, struct ieee80211_bssid)
+
+#endif	/* __NetBSD__ */
+
 /*
  * Virtual AP cloning parameters.  The parent device must
  * be a vap-capable device.  All parameters specified with
@@ -858,6 +1115,5 @@ struct ieee80211_clone_params {
 #define	IEEE80211_CLONE_WDSLEGACY	0x0004	/* legacy WDS processing */
 #define	IEEE80211_CLONE_MACADDR		0x0008	/* use specified mac addr */
 #define	IEEE80211_CLONE_TDMA		0x0010	/* operate in TDMA mode */
-#endif /* __FreeBSD__ */
 
 #endif /* _NET80211_IEEE80211_IOCTL_H_ */

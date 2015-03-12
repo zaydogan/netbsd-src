@@ -45,8 +45,8 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_node.c,v 1.68 2014/10/18 08:33:29 snj Exp 
 #include <sys/socket.h>
  
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_input.h>
@@ -107,9 +107,6 @@ static void ieee80211_node_table_reset(struct ieee80211_node_table *,
 static void ieee80211_node_table_cleanup(struct ieee80211_node_table *nt);
 static void ieee80211_erp_timeout(struct ieee80211com *);
 
-MALLOC_DEFINE(M_80211_NODE, "80211node", "802.11 node state");
-MALLOC_DEFINE(M_80211_NODE_IE, "80211nodeie", "802.11 node ie");
-
 void
 ieee80211_node_attach(struct ieee80211com *ic)
 {
@@ -142,7 +139,9 @@ void
 ieee80211_node_detach(struct ieee80211com *ic)
 {
 
+#ifdef notyet	/* XXX FBSD80211 callout drain */
 	callout_drain(&ic->ic_inact);
+#endif
 	ieee80211_node_table_cleanup(&ic->ic_sta);
 	ieee80211_ageq_cleanup(&ic->ic_stageq);
 }
@@ -286,7 +285,7 @@ ieee80211_node_set_chan(struct ieee80211_node *ni,
 	struct ieee80211vap *vap = ni->ni_vap;
 	enum ieee80211_phymode mode;
 
-	KASSERT(chan != IEEE80211_CHAN_ANYC, ("no channel"));
+	IASSERT(chan != IEEE80211_CHAN_ANYC, ("no channel"));
 
 	ni->ni_chan = chan;
 	mode = ieee80211_chan2mode(chan);
@@ -436,7 +435,7 @@ ieee80211_reset_bss(struct ieee80211vap *vap)
 	ieee80211_reset_erp(ic);
 
 	ni = ieee80211_alloc_node(&ic->ic_sta, vap, vap->iv_myaddr);
-	KASSERT(ni != NULL, ("unable to setup initial BSS node"));
+	IASSERT(ni != NULL, ("unable to setup initial BSS node"));
 	obss = vap->iv_bss;
 	vap->iv_bss = ieee80211_ref_node(ni);
 	if (obss != NULL) {
@@ -1058,7 +1057,7 @@ node_cleanup(struct ieee80211_node *ni)
 	 *
 	 * XXX does this leave us open to inheriting old state?
 	 */
-	for (i = 0; i < nitems(ni->ni_rxfrag); i++)
+	for (i = 0; i < __arraycount(ni->ni_rxfrag); i++)
 		if (ni->ni_rxfrag[i] != NULL) {
 			m_freem(ni->ni_rxfrag[i]);
 			ni->ni_rxfrag[i] = NULL;
@@ -1315,7 +1314,7 @@ ieee80211_node_create_wds(struct ieee80211vap *vap,
 			 */
 			c = ieee80211_find_channel(ic,
 			    c->ic_freq, c->ic_flags &~ IEEE80211_CHAN_HT);
-			KASSERT(c != NULL, ("no legacy channel, %u/%x",
+			IASSERT(c != NULL, ("no legacy channel, %u/%x",
 			    ni->ni_chan->ic_freq, ni->ni_chan->ic_flags));
 			ni->ni_chan = c;
 		}
@@ -1842,7 +1841,7 @@ ieee80211_node_delucastkey(struct ieee80211_node *ni)
 		IEEE80211_NODE_UNLOCK(nt);
 
 	if (nikey != NULL) {
-		KASSERT(nikey == ni,
+		IASSERT(nikey == ni,
 			("key map out of sync, ni %p nikey %p", ni, nikey));
 		IEEE80211_DPRINTF(ni->ni_vap, IEEE80211_MSG_NODE,
 			"%s: delete key map entry %p<%s> refcnt %d\n",
@@ -2481,7 +2480,7 @@ ieee80211_node_join(struct ieee80211_node *ni, int resp)
 	if (ni->ni_associd == 0) {
 		uint16_t aid;
 
-		KASSERT(vap->iv_aid_bitmap != NULL, ("no aid bitmap"));
+		IASSERT(vap->iv_aid_bitmap != NULL, ("no aid bitmap"));
 		/*
 		 * It would be good to search the bitmap
 		 * more efficiently, but this will do for now.
@@ -2548,7 +2547,7 @@ ieee80211_node_join(struct ieee80211_node *ni, int resp)
 static void
 disable_protection(struct ieee80211com *ic)
 {
-	KASSERT(ic->ic_nonerpsta == 0 &&
+	IASSERT(ic->ic_nonerpsta == 0 &&
 	    (ic->ic_flags_ext & IEEE80211_FEXT_NONERP_PR) == 0,
 	   ("%d non ERP stations, flags 0x%x", ic->ic_nonerpsta,
 	   ic->ic_flags_ext));
@@ -2572,7 +2571,7 @@ ieee80211_node_leave_11g(struct ieee80211_node *ni)
 
 	IEEE80211_LOCK_ASSERT(ic);
 
-	KASSERT(IEEE80211_IS_CHAN_ANYG(ic->ic_bsschan),
+	IASSERT(IEEE80211_IS_CHAN_ANYG(ic->ic_bsschan),
 	     ("not in 11g, bss %u:0x%x", ic->ic_bsschan->ic_freq,
 	      ic->ic_bsschan->ic_flags));
 
@@ -2580,7 +2579,7 @@ ieee80211_node_leave_11g(struct ieee80211_node *ni)
 	 * If a long slot station do the slot time bookkeeping.
 	 */
 	if ((ni->ni_capinfo & IEEE80211_CAPINFO_SHORT_SLOTTIME) == 0) {
-		KASSERT(ic->ic_longslotsta > 0,
+		IASSERT(ic->ic_longslotsta > 0,
 		    ("bogus long slot station count %d", ic->ic_longslotsta));
 		ic->ic_longslotsta--;
 		IEEE80211_NOTE(ni->ni_vap, IEEE80211_MSG_ASSOC, ni,
@@ -2605,7 +2604,7 @@ ieee80211_node_leave_11g(struct ieee80211_node *ni)
 	 * If a non-ERP station do the protection-related bookkeeping.
 	 */
 	if ((ni->ni_flags & IEEE80211_NODE_ERP) == 0) {
-		KASSERT(ic->ic_nonerpsta > 0,
+		IASSERT(ic->ic_nonerpsta > 0,
 		    ("bogus non-ERP station count %d", ic->ic_nonerpsta));
 		ic->ic_nonerpsta--;
 		IEEE80211_NOTE(ni->ni_vap, IEEE80211_MSG_ASSOC, ni,
@@ -2661,7 +2660,7 @@ ieee80211_node_leave(struct ieee80211_node *ni)
 	IEEE80211_NOTE(vap, IEEE80211_MSG_ASSOC | IEEE80211_MSG_DEBUG, ni,
 	    "station with aid %d leaves", IEEE80211_NODE_AID(ni));
 
-	KASSERT(vap->iv_opmode != IEEE80211_M_STA,
+	IASSERT(vap->iv_opmode != IEEE80211_M_STA,
 		("unexpected operating mode %u", vap->iv_opmode));
 	/*
 	 * If node wasn't previously associated all

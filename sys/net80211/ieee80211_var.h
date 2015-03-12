@@ -127,13 +127,13 @@ struct ieee80211com {
 	enum ieee80211_opmode	ic_opmode;	/* operation mode */
 	struct ifmedia		ic_media;	/* interface media config */
 	struct callout		ic_inact;	/* inactivity processing */
-	struct taskqueue	*ic_tq;		/* deferred state thread */
-	struct task		ic_parent_task;	/* deferred parent processing */
-	struct task		ic_promisc_task;/* deferred promisc update */
-	struct task		ic_mcast_task;	/* deferred mcast update */
-	struct task		ic_chan_task;	/* deferred channel change */
-	struct task		ic_bmiss_task;	/* deferred beacon miss hndlr */
-	struct task		ic_chw_task;	/* deferred HT CHW update */
+	struct workqueue	*ic_tq;		/* deferred state thread */
+	struct work		ic_parent_task;	/* deferred parent processing */
+	struct work		ic_promisc_task;/* deferred promisc update */
+	struct work		ic_mcast_task;	/* deferred mcast update */
+	struct work		ic_chan_task;	/* deferred channel change */
+	struct work		ic_bmiss_task;	/* deferred beacon miss hndlr */
+	struct work		ic_chw_task;	/* deferred HT CHW update */
 
 	uint32_t		ic_flags;	/* state flags */
 	uint32_t		ic_flags_ext;	/* extended state flags */
@@ -362,8 +362,8 @@ struct ieee80211vap {
 	enum ieee80211_state	iv_state;	/* state machine state */
 	enum ieee80211_state	iv_nstate;	/* pending state */
 	int			iv_nstate_arg;	/* pending state arg */
-	struct task		iv_nstate_task;	/* deferred state processing */
-	struct task		iv_swbmiss_task;/* deferred iv_bmiss call */
+	struct work		iv_nstate_task;	/* deferred state processing */
+	struct work		iv_swbmiss_task;/* deferred iv_bmiss call */
 	struct callout		iv_mgtsend;	/* mgmt frame response timer */
 						/* inactivity timer settings */
 	int			iv_inact_init;	/* setting for new station */
@@ -498,16 +498,10 @@ struct ieee80211vap {
 	int			(*iv_newstate)(struct ieee80211vap *,
 				    enum ieee80211_state, int);
 	/* 802.3 output method for raw frame xmit */
-#if __FreeBSD_version >= 1000031
 	int			(*iv_output)(struct ifnet *, struct mbuf *,
-				    const struct sockaddr *, struct route *);
-#else
-	int			(*iv_output)(struct ifnet *, struct mbuf *,
-				    struct sockaddr *, struct route *);
-#endif
+				    const struct sockaddr *, struct rtentry *);
 	uint64_t		iv_spare[6];
 };
-MALLOC_DECLARE(M_80211_VAP);
 
 #define	IEEE80211_ADDR_EQ(a1,a2)	(memcmp(a1,a2,IEEE80211_ADDR_LEN) == 0)
 #define	IEEE80211_ADDR_COPY(dst,src)	memcpy(dst,src,IEEE80211_ADDR_LEN)
@@ -696,7 +690,7 @@ void	ieee80211_media_init(struct ieee80211com *);
 struct ieee80211com *ieee80211_find_vap(const uint8_t mac[IEEE80211_ADDR_LEN]);
 int	ieee80211_media_change(struct ifnet *);
 void	ieee80211_media_status(struct ifnet *, struct ifmediareq *);
-int	ieee80211_ioctl(struct ifnet *, u_long, caddr_t);
+int	ieee80211_ioctl(struct ifnet *, u_long, void *);
 int	ieee80211_rate2media(struct ieee80211com *, int,
 		enum ieee80211_phymode);
 int	ieee80211_media2rate(int);
@@ -748,18 +742,20 @@ ieee80211_radiotap_active_vap(const struct ieee80211vap *vap)
  * Enqueue a task on the state thread.
  */
 static __inline void
-ieee80211_runtask(struct ieee80211com *ic, struct task *task)
+ieee80211_runtask(struct ieee80211com *ic, struct work *task)
 {
-	taskqueue_enqueue(ic->ic_tq, task);
+	workqueue_enqueue(ic->ic_tq, task, NULL);
 }
 
 /*
  * Wait for a queued task to complete.
  */
 static __inline void
-ieee80211_draintask(struct ieee80211com *ic, struct task *task)
+ieee80211_draintask(struct ieee80211com *ic, struct work *task)
 {
-	taskqueue_drain(ic->ic_tq, task);
+#ifdef notyet	/* XXX FBSD80211 task work drain */
+	workqueue_drain(ic->ic_tq, task);
+#endif
 }
 
 /* 

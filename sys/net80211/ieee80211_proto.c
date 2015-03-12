@@ -50,7 +50,6 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_proto.c,v 1.30 2013/01/10 17:40:10 christo
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>		/* XXX for ether_sprintf */
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_adhoc.h>
@@ -670,9 +669,9 @@ ieee80211_iserp_rateset(const struct ieee80211_rateset *rs)
 	static const int rates[] = { 2, 4, 11, 22, 12, 24, 48 };
 	int i, j;
 
-	if (rs->rs_nrates < nitems(rates))
+	if (rs->rs_nrates < __arraycount(rates))
 		return 0;
-	for (i = 0; i < nitems(rates); i++) {
+	for (i = 0; i < __arraycount(rates); i++) {
 		for (j = 0; j < rs->rs_nrates; j++) {
 			int r = rs->rs_rates[j] & IEEE80211_RATE_VAL;
 			if (rates[i] == r)
@@ -1311,10 +1310,10 @@ ieee80211_start_locked(struct ieee80211vap *vap)
 /*
  * Start a single vap.
  */
-void
-ieee80211_init(void *arg)
+int
+ieee80211_init(struct ifnet *ifp)
 {
-	struct ieee80211vap *vap = arg;
+	struct ieee80211vap *vap = ifp->if_softc;
 
 	IEEE80211_DPRINTF(vap, IEEE80211_MSG_STATE | IEEE80211_MSG_DEBUG,
 	    "%s\n", __func__);
@@ -1322,6 +1321,8 @@ ieee80211_init(void *arg)
 	IEEE80211_LOCK(vap->iv_ic);
 	ieee80211_start_locked(vap);
 	IEEE80211_UNLOCK(vap->iv_ic);
+
+	return 0;
 }
 
 /*
@@ -1505,7 +1506,7 @@ ieee80211_swbmiss(void *arg)
 	IEEE80211_LOCK_ASSERT(ic);
 
 	/* XXX sleep state? */
-	KASSERT(vap->iv_state == IEEE80211_S_RUN,
+	IASSERT(vap->iv_state == IEEE80211_S_RUN,
 	    ("wrong state %d", vap->iv_state));
 
 	if (ic->ic_flags & IEEE80211_F_SCAN) {
@@ -1601,7 +1602,7 @@ ieee80211_csa_completeswitch(struct ieee80211com *ic)
 
 	IEEE80211_LOCK_ASSERT(ic);
 
-	KASSERT(ic->ic_flags & IEEE80211_F_CSAPENDING, ("csa not pending"));
+	IASSERT(ic->ic_flags & IEEE80211_F_CSAPENDING, ("csa not pending"));
 
 	ieee80211_setcurchan(ic, ic->ic_csa_newchan);
 	TAILQ_FOREACH(vap, &ic->ic_vaps, iv_next)
@@ -1639,7 +1640,7 @@ ieee80211_cac_completeswitch(struct ieee80211vap *vap0)
 	 * Complete CAC state change for lead vap first; then
 	 * clock all the other vap's waiting.
 	 */
-	KASSERT(vap0->iv_state == IEEE80211_S_CAC,
+	IASSERT(vap0->iv_state == IEEE80211_S_CAC,
 	    ("wrong state %d", vap0->iv_state));
 	ieee80211_new_state_locked(vap0, IEEE80211_S_RUN, 0);
 
@@ -1765,8 +1766,8 @@ ieee80211_newstate_cb(void *xvap, int npending)
 	vap->iv_flags_ext &= ~IEEE80211_FEXT_STATEWAIT;
 	if (rc != 0) {
 		/* State transition failed */
-		KASSERT(rc != EINPROGRESS, ("iv_newstate was deferred"));
-		KASSERT(nstate != IEEE80211_S_INIT,
+		IASSERT(rc != EINPROGRESS, ("iv_newstate was deferred"));
+		IASSERT(nstate != IEEE80211_S_INIT,
 		    ("INIT state change failed"));
 		IEEE80211_DPRINTF(vap, IEEE80211_MSG_STATE,
 		    "%s: %s returned error %d\n", __func__,
@@ -1897,7 +1898,7 @@ ieee80211_new_state_locked(struct ieee80211vap *vap,
 			/*
 			 * INIT -> SCAN happens on initial bringup.
 			 */
-			KASSERT(!(nscanning && nrunning),
+			IASSERT(!(nscanning && nrunning),
 			    ("%d scanning and %d running", nscanning, nrunning));
 			if (nscanning) {
 				/*

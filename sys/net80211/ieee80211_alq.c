@@ -49,7 +49,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/endian.h>
 #include <sys/kernel.h>
 #include <sys/sysctl.h>
-#include <sys/pcpu.h>
+#include <sys/percpu.h>
 #include <sys/proc.h>
 #include <sys/ucred.h>
 #include <sys/alq.h>
@@ -57,14 +57,12 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/socket.h>
 
 #include <net/if.h>
-#include <net/if_var.h>
 #include <net/if_dl.h>
 #include <net/if_clone.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_freebsd.h>
 #include <net80211/ieee80211_alq.h>
 
 static struct alq *ieee80211_alq;

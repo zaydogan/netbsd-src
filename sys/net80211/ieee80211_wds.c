@@ -55,7 +55,6 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <net/if.h>
 #include <net/if_media.h>
 #include <net/if_llc.h>
-#include <net/ethernet.h>
 
 #include <net/bpf.h>
 
@@ -136,9 +135,9 @@ ieee80211_create_wds(struct ieee80211vap *vap, struct ieee80211_channel *chan)
 	     ether_sprintf(vap->iv_des_bssid), ieee80211_chan2ieee(ic, chan));
 
 	/* NB: vap create must specify the bssid for the link */
-	KASSERT(vap->iv_flags & IEEE80211_F_DESBSSID, ("no bssid"));
+	IASSERT(vap->iv_flags & IEEE80211_F_DESBSSID, ("no bssid"));
 	/* NB: we should only be called on RUN transition */
-	KASSERT(vap->iv_state == IEEE80211_S_RUN, ("!RUN state"));
+	IASSERT(vap->iv_state == IEEE80211_S_RUN, ("!RUN state"));
 
 	if ((vap->iv_flags_ext & IEEE80211_FEXT_WDSLEGACY) == 0) {
 		/*
@@ -244,7 +243,7 @@ ieee80211_dwds_mcast(struct ieee80211vap *vap0, struct mbuf *m)
 	struct mbuf *mcopy;
 	int err;
 
-	KASSERT(ETHER_IS_MULTICAST(eh->ether_dhost),
+	IASSERT(ETHER_IS_MULTICAST(eh->ether_dhost),
 	    ("%s not mcast", ether_sprintf(eh->ether_dhost)));
 
 	/* XXX locking */
@@ -297,7 +296,7 @@ ieee80211_dwds_mcast(struct ieee80211vap *vap0, struct mbuf *m)
 			ieee80211_free_node(ni);
 			continue;
 		}
-		mcopy->m_flags |= M_MCAST;
+		M_SET_FLAGS(mcopy, M_MCAST);
 		mcopy->m_pkthdr.rcvif = (void *) ni;
 
 		err = ieee80211_parent_xmitpkt(ic, mcopy);
@@ -421,7 +420,7 @@ wds_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 	uint8_t dir, type, subtype, qos;
 	uint16_t rxseq;
 
-	if (m->m_flags & M_AMPDU_MPDU) {
+	if (M_GET_FLAGS(m) & M_AMPDU_MPDU) {
 		/*
 		 * Fastpath for A-MPDU reorder q resubmission.  Frames
 		 * w/ M_AMPDU_MPDU marked have already passed through
@@ -438,7 +437,7 @@ wds_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 		goto resubmit_ampdu;
 	}
 
-	KASSERT(ni != NULL, ("null node"));
+	IASSERT(ni != NULL, ("null node"));
 
 	type = -1;			/* undefined */
 
@@ -546,7 +545,7 @@ wds_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 		 * will return 0; otherwise it has consumed the mbuf
 		 * and we should do nothing more with it.
 		 */
-		if ((m->m_flags & M_AMPDU) &&
+		if ((M_GET_FLAGS(m) & M_AMPDU) &&
 		    ieee80211_ampdu_reorder(ni, m) != 0) {
 			m = NULL;
 			goto out;
@@ -664,7 +663,7 @@ wds_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 			 * any non-PAE frames received without encryption.
 			 */
 			if ((vap->iv_flags & IEEE80211_F_DROPUNENC) &&
-			    (key == NULL && (m->m_flags & M_WEP) == 0) &&
+			    (key == NULL && (M_GET_FLAGS(m) & M_WEP) == 0) &&
 			    eh->ether_type != htons(ETHERTYPE_PAE)) {
 				/*
 				 * Drop unencrypted frames.

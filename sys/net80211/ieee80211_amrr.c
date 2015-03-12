@@ -38,13 +38,14 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_amrr.c,v 1.2 2007/12/11 12:40:10 lukem Exp
 #include <sys/module.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
+#include <sys/malloc.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/if_ether.h>
+#include <net/if_ether.h>
 #endif
 
 #include <net80211/ieee80211_var.h>
@@ -72,13 +73,15 @@ static void	amrr_tx_complete(const struct ieee80211vap *,
 			void *, void *);
 static void	amrr_tx_update(const struct ieee80211vap *vap,
 			const struct ieee80211_node *, void *, void *, void *);
+#ifdef notyet	/* XXX FBSD80211 sysctl */
 static void	amrr_sysctlattach(struct ieee80211vap *,
 			struct sysctl_ctx_list *, struct sysctl_oid *);
 
 /* number of references from net80211 layer */
 static	int nrefs = 0;
+#endif
 
-static const struct ieee80211_ratectl amrr = {
+static const struct ieee80211_ratectl amrr_ratectl = {
 	.ir_name	= "amrr",
 	.ir_attach	= NULL,
 	.ir_detach	= NULL,
@@ -92,7 +95,7 @@ static const struct ieee80211_ratectl amrr = {
 	.ir_setinterval	= amrr_setinterval,
 };
 IEEE80211_RATECTL_MODULE(amrr, 1);
-IEEE80211_RATECTL_ALG(amrr, IEEE80211_RATECTL_AMRR, amrr);
+IEEE80211_RATECTL_ALG(amrr, IEEE80211_RATECTL_AMRR, amrr_ratectl);
 
 static void
 amrr_setinterval(const struct ieee80211vap *vap, int msecs)
@@ -111,7 +114,7 @@ amrr_init(struct ieee80211vap *vap)
 {
 	struct ieee80211_amrr *amrr;
 
-	KASSERT(vap->iv_rs == NULL, ("%s called multiple times", __func__));
+	IASSERT(vap->iv_rs == NULL, ("%s called multiple times", __func__));
 
 	amrr = vap->iv_rs = malloc(sizeof(struct ieee80211_amrr),
 	    M_80211_RATECTL, M_NOWAIT|M_ZERO);
@@ -122,7 +125,9 @@ amrr_init(struct ieee80211vap *vap)
 	amrr->amrr_min_success_threshold = IEEE80211_AMRR_MIN_SUCCESS_THRESHOLD;
 	amrr->amrr_max_success_threshold = IEEE80211_AMRR_MAX_SUCCESS_THRESHOLD;
 	amrr_setinterval(vap, 500 /* ms */);
+#ifdef notyet	/* XXX FBSD80211 sysctl */
 	amrr_sysctlattach(vap, vap->iv_sysctl, vap->iv_oid);
+#endif
 }
 
 static void
@@ -226,7 +231,7 @@ amrr_update(struct ieee80211_amrr *amrr, struct ieee80211_amrr_node *amn,
 	int rix = amn->amn_rix;
 	const struct ieee80211_rateset *rs = NULL;
 
-	KASSERT(is_enough(amn), ("txcnt %d", amn->amn_txcnt));
+	IASSERT(is_enough(amn), ("txcnt %d", amn->amn_txcnt));
 
 	/* 11n or not? Pick the right rateset */
 	if (amrr_node_is_11n(ni)) {
@@ -368,6 +373,7 @@ amrr_tx_update(const struct ieee80211vap *vap, const struct ieee80211_node *ni,
 	amn->amn_retrycnt = retrycnt;
 }
 
+#ifdef notyet	/* XXX FBSD80211 sysctl */
 static int
 amrr_sysctl_interval(SYSCTL_HANDLER_ARGS)
 {
@@ -400,3 +406,4 @@ amrr_sysctlattach(struct ieee80211vap *vap,
 	    "amrr_min_sucess_threshold", CTLFLAG_RW,
 	    &amrr->amrr_min_success_threshold, 0, "");
 }
+#endif

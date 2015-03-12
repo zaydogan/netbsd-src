@@ -98,13 +98,8 @@ int	ieee80211_mgmt_output(struct ieee80211_node *, struct mbuf *, int,
 		struct ieee80211_bpf_params *);
 int	ieee80211_raw_xmit(struct ieee80211_node *, struct mbuf *,
 		const struct ieee80211_bpf_params *);
-#if __FreeBSD_version >= 1000031
 int	ieee80211_output(struct ifnet *, struct mbuf *,
-               const struct sockaddr *, struct route *ro);
-#else
-int	ieee80211_output(struct ifnet *, struct mbuf *,
-               struct sockaddr *, struct route *ro);
-#endif
+               const struct sockaddr *, struct rtentry *);
 int	ieee80211_vap_pkt_send_dest(struct ieee80211vap *, struct mbuf *,
 		struct ieee80211_node *);
 int	ieee80211_raw_output(struct ieee80211vap *, struct ieee80211_node *,
@@ -175,7 +170,7 @@ ieee80211_hdrsize(const void *data)
 	int size = sizeof(struct ieee80211_frame);
 
 	/* NB: we don't handle control frames */
-	KASSERT((wh->i_fc[0]&IEEE80211_FC0_TYPE_MASK) != IEEE80211_FC0_TYPE_CTL,
+	IASSERT((wh->i_fc[0]&IEEE80211_FC0_TYPE_MASK) != IEEE80211_FC0_TYPE_CTL,
 		("%s: control frame", __func__));
 	if (IEEE80211_IS_DSTODS(wh))
 		size += IEEE80211_ADDR_LEN;
@@ -323,7 +318,7 @@ ieee80211_gettid(const struct ieee80211_frame *wh)
 
 void	ieee80211_waitfor_parent(struct ieee80211com *);
 void	ieee80211_start_locked(struct ieee80211vap *);
-void	ieee80211_init(void *);
+int	ieee80211_init(struct ifnet *);
 void	ieee80211_start_all(struct ieee80211com *);
 void	ieee80211_stop_locked(struct ieee80211vap *);
 void	ieee80211_stop(struct ieee80211vap *);

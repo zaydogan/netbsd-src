@@ -44,6 +44,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/mbuf.h>   
 #include <sys/malloc.h>
 #include <sys/kernel.h>
+#include <sys/mbuf.h>
 
 #include <sys/socket.h>
 #include <sys/sockio.h>
@@ -53,9 +54,9 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 #include <net/if_llc.h>
-#include <net/ethernet.h>
 
 #include <net/bpf.h>
 
@@ -305,7 +306,7 @@ adhoc_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 	uint8_t *bssid;
 	uint16_t rxseq;
 
-	if (m->m_flags & M_AMPDU_MPDU) {
+	if (M_GET_FLAGS(m) & M_AMPDU_MPDU) {
 		/*
 		 * Fastpath for A-MPDU reorder q resubmission.  Frames
 		 * w/ M_AMPDU_MPDU marked have already passed through
@@ -322,7 +323,7 @@ adhoc_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 		goto resubmit_ampdu;
 	}
 
-	KASSERT(ni != NULL, ("null node"));
+	IASSERT(ni != NULL, ("null node"));
 	ni->ni_inact = ni->ni_inact_reload;
 
 	type = -1;			/* undefined */
@@ -464,7 +465,7 @@ adhoc_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 		 * will return 0; otherwise it has consumed the mbuf
 		 * and we should do nothing more with it.
 		 */
-		if ((m->m_flags & M_AMPDU) &&
+		if ((M_GET_FLAGS(m) & M_AMPDU) &&
 		    ieee80211_ampdu_reorder(ni, m) != 0) {
 			m = NULL;
 			goto out;
@@ -582,7 +583,7 @@ adhoc_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 			 * any non-PAE frames received without encryption.
 			 */
 			if ((vap->iv_flags & IEEE80211_F_DROPUNENC) &&
-			    (key == NULL && (m->m_flags & M_WEP) == 0) &&
+			    (key == NULL && (M_GET_FLAGS(m) & M_WEP) == 0) &&
 			    eh->ether_type != htons(ETHERTYPE_PAE)) {
 				/*
 				 * Drop unencrypted frames.
@@ -691,7 +692,7 @@ adhoc_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 	struct ieee80211vap *vap = ni->ni_vap;
 	struct ieee80211com *ic = ni->ni_ic;
 	struct ieee80211_frame *wh;
-	uint8_t *frm, *efrm, *sfrm;
+	uint8_t *frm, *efrm;
 	uint8_t *ssid, *rates, *xrates;
 #if 0
 	int ht_state_change = 0;
@@ -819,7 +820,6 @@ adhoc_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 		 *	[tlv] extended supported rates
 		 */
 		ssid = rates = xrates = NULL;
-		sfrm = frm;
 		while (efrm - frm > 1) {
 			IEEE80211_VERIFY_LENGTH(efrm - frm, frm[1] + 2, return);
 			switch (*frm) {
@@ -913,7 +913,7 @@ ahdemo_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 {
 	struct ieee80211vap *vap = ni->ni_vap;
 	struct ieee80211com *ic = ni->ni_ic;
-	struct ieee80211_frame *wh;
+	struct ieee80211_frame *wh __debugused;
 
 	/*
 	 * Process management frames when scanning; useful for doing

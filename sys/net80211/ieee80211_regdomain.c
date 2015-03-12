@@ -245,7 +245,7 @@ sort_channels(void *a, size_t n, size_t size)
 	uint8_t *aa = a;
 	uint8_t *ai, *t;
 
-	KASSERT(n > 0, ("no channels"));
+	IASSERT(n > 0, ("no channels"));
 	for (ai = aa+size; --n >= 1; ai += size)
 		for (t = ai; t > aa; t -= size) {
 			uint8_t *u = t - size;

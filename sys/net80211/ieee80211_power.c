@@ -46,7 +46,6 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 
 #include <net80211/ieee80211_var.h>
 
@@ -54,8 +53,6 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 static void ieee80211_update_ps(struct ieee80211vap *, int);
 static int ieee80211_set_tim(struct ieee80211_node *, int);
-
-static MALLOC_DEFINE(M_80211_POWER, "80211power", "802.11 power save state");
 
 void
 ieee80211_power_attach(struct ieee80211com *ic)
@@ -122,7 +119,7 @@ ieee80211_psq_cleanup(struct ieee80211_psq *psq)
 #if 0
 	psq_drain(psq);				/* XXX should not be needed? */
 #else
-	KASSERT(psq->psq_len == 0, ("%d frames on ps q", psq->psq_len));
+	IASSERT(psq->psq_len == 0, ("%d frames on ps q", psq->psq_len));
 #endif
 	IEEE80211_PSQ_DESTROY(psq);		/* OS-dependent cleanup */
 }
@@ -143,9 +140,9 @@ again:
 	if ((m = qhead->head) != NULL) {
 		if ((qhead->head = m->m_nextpkt) == NULL)
 			qhead->tail = NULL;
-		KASSERT(qhead->len > 0, ("qhead len %d", qhead->len));
+		IASSERT(qhead->len > 0, ("qhead len %d", qhead->len));
 		qhead->len--;
-		KASSERT(psq->psq_len > 0, ("psq len %d", psq->psq_len));
+		IASSERT(psq->psq_len > 0, ("psq len %d", psq->psq_len));
 		psq->psq_len--;
 		m->m_nextpkt = NULL;
 	}
@@ -167,7 +164,7 @@ again:
 static void
 psq_mfree(struct mbuf *m)
 {
-	if (m->m_flags & M_ENCAP) {
+	if (M_GET_FLAGS(m) & M_ENCAP) {
 		struct ieee80211_node *ni = (void *) m->m_pkthdr.rcvif;
 		ieee80211_free_node(ni);
 	}
@@ -248,9 +245,9 @@ ieee80211_node_psq_age(struct ieee80211_node *ni)
 			     "discard frame, age %u", M_AGE_GET(m));
 			if ((qhead->head = m->m_nextpkt) == NULL)
 				qhead->tail = NULL;
-			KASSERT(qhead->len > 0, ("qhead len %d", qhead->len));
+			IASSERT(qhead->len > 0, ("qhead len %d", qhead->len));
 			qhead->len--;
-			KASSERT(psq->psq_len > 0, ("psq len %d", psq->psq_len));
+			IASSERT(psq->psq_len > 0, ("psq len %d", psq->psq_len));
 			psq->psq_len--;
 			psq_mfree(m);
 			discard++;
@@ -277,7 +274,7 @@ static void
 ieee80211_update_ps(struct ieee80211vap *vap, int nsta)
 {
 
-	KASSERT(vap->iv_opmode == IEEE80211_M_HOSTAP ||
+	IASSERT(vap->iv_opmode == IEEE80211_M_HOSTAP ||
 		vap->iv_opmode == IEEE80211_M_IBSS,
 		("operating mode %u", vap->iv_opmode));
 }
@@ -293,12 +290,12 @@ ieee80211_set_tim(struct ieee80211_node *ni, int set)
 	uint16_t aid;
 	int changed;
 
-	KASSERT(vap->iv_opmode == IEEE80211_M_HOSTAP ||
+	IASSERT(vap->iv_opmode == IEEE80211_M_HOSTAP ||
 		vap->iv_opmode == IEEE80211_M_IBSS,
 		("operating mode %u", vap->iv_opmode));
 
 	aid = IEEE80211_AID(ni->ni_associd);
-	KASSERT(aid < vap->iv_max_aid,
+	IASSERT(aid < vap->iv_max_aid,
 		("bogus aid %u, max %u", aid, vap->iv_max_aid));
 
 	IEEE80211_LOCK(ic);
@@ -363,7 +360,7 @@ ieee80211_pwrsave(struct ieee80211_node *ni, struct mbuf *m)
 	 * this to order frames returned out of the driver
 	 * ahead of frames we collect in ieee80211_start.
 	 */
-	if (m->m_flags & M_ENCAP)
+	if (M_GET_FLAGS(m) & M_ENCAP)
 		qhead = &psq->psq_head[0];
 	else
 		qhead = &psq->psq_head[1];
@@ -393,7 +390,7 @@ ieee80211_pwrsave(struct ieee80211_node *ni, struct mbuf *m)
 		qhead->tail->m_nextpkt = m;
 		age -= M_AGE_GET(qhead->head);
 	}
-	KASSERT(age >= 0, ("age %d", age));
+	IASSERT(age >= 0, ("age %d", age));
 	M_AGE_SET(m, age);
 	m->m_nextpkt = NULL;
 	qhead->tail = m;
@@ -465,7 +462,7 @@ pwrsave_flushq(struct ieee80211_node *ni)
 			parent_q = m->m_nextpkt;
 			m->m_nextpkt = NULL;
 			/* must be encapsulated */
-			KASSERT((m->m_flags & M_ENCAP),
+			IASSERT((M_GET_FLAGS(m) & M_ENCAP),
 			    ("%s: parentq with non-M_ENCAP frame!\n",
 			    __func__));
 			/*
@@ -483,7 +480,7 @@ pwrsave_flushq(struct ieee80211_node *ni)
 			m = ifp_q;
 			ifp_q = m->m_nextpkt;
 			m->m_nextpkt = NULL;
-			KASSERT((!(m->m_flags & M_ENCAP)),
+			IASSERT((!(M_GET_FLAGS(m) & M_ENCAP)),
 			    ("%s: vapq with M_ENCAP frame!\n", __func__));
 			(void) ieee80211_vap_xmitpkt(vap, m);
 		}

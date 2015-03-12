@@ -46,7 +46,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/if_ether.h>
+#include <net/if_ether.h>
 #endif
 
 #include <net80211/ieee80211_var.h>

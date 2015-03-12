@@ -54,7 +54,6 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_crypto_tkip.c,v 1.12 2014/10/18 08:33:29 s
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 
 #include <net80211/ieee80211_var.h>
 
@@ -134,7 +133,7 @@ tkip_detach(struct ieee80211_key *k)
 	struct tkip_ctx *ctx = k->wk_private;
 
 	free(ctx, M_80211_CRYPTO);
-	KASSERT(nrefs > 0, ("imbalanced attach/detach"));
+	IASSERT(nrefs > 0, ("imbalanced attach/detach"));
 	nrefs--;			/* NB: we assume caller locking */
 }
 
@@ -628,7 +627,7 @@ wep_encrypt(u8 *key, struct mbuf *m0, u_int off, size_t data_len,
 		}
 		m = m->m_next;
 		if (m == NULL) {
-			KASSERT(data_len == 0,
+			IASSERT(data_len == 0,
 			    ("out of buffers with data_len %zu\n", data_len));
 			break;
 		}
@@ -686,7 +685,7 @@ wep_decrypt(u8 *key, struct mbuf *m, u_int off, size_t data_len)
 		}
 		m = m->m_next;
 		if (m == NULL) {
-			KASSERT(data_len == 0,
+			IASSERT(data_len == 0,
 			    ("out of buffers with data_len %zu\n", data_len));
 			break;
 		}
@@ -854,7 +853,7 @@ michael_mic(struct tkip_ctx *ctx, const u8 *key,
 			break;
 		m = m->m_next;
 		if (m == NULL) {
-			KASSERT(0, ("out of data, data_len %zu\n", data_len));
+			IASSERT(0, ("out of data, data_len %zu\n", data_len));
 			break;
 		}
 		if (space != 0) {
@@ -863,7 +862,7 @@ michael_mic(struct tkip_ctx *ctx, const u8 *key,
 			 * Block straddles buffers, split references.
 			 */
 			data_next = mtod(m, const uint8_t *);
-			KASSERT(m->m_len >= sizeof(uint32_t) - space,
+			IASSERT(m->m_len >= sizeof(uint32_t) - space,
 				("not enough data in following buffer, "
 				"m_len %u need %zu\n", m->m_len,
 				sizeof(uint32_t) - space));
@@ -902,7 +901,7 @@ michael_mic(struct tkip_ctx *ctx, const u8 *key,
 	 * mbuf[2 bytes].  I don't believe these should happen; if they
 	 * do then we'll need more involved logic.
 	 */
-	KASSERT(data_len <= space,
+	IASSERT(data_len <= space,
 	    ("not enough data, data_len %zu space %u\n", data_len, space));
 
 	/* Last block and padding (0x5a, 4..7 x 0) */

@@ -50,7 +50,6 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_crypto_wep.c,v 1.8 2008/12/17 20:51:37 ceg
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 
 #include <net80211/ieee80211_var.h>
 
@@ -114,7 +113,7 @@ wep_detach(struct ieee80211_key *k)
 	struct wep_ctx *ctx = k->wk_private;
 
 	free(ctx, M_80211_CRYPTO);
-	KASSERT(nrefs > 0, ("imbalanced attach/detach"));
+	IASSERT(nrefs > 0, ("imbalanced attach/detach"));
 	nrefs--;			/* NB: we assume caller locking */
 }
 
@@ -220,7 +219,7 @@ wep_decap(struct ieee80211_key *k, struct mbuf *m, int hdrlen)
 {
 	struct wep_ctx *ctx = k->wk_private;
 	struct ieee80211vap *vap = ctx->wc_vap;
-	struct ieee80211_frame *wh;
+	struct ieee80211_frame *wh __debugused;
 
 	wh = mtod(m, struct ieee80211_frame *);
 

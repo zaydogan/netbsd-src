@@ -48,11 +48,8 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_crypto.c,v 1.16 2013/09/13 20:19:53 joerg 
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>		/* XXX ETHER_HDR_LEN */
 
 #include <net80211/ieee80211_var.h>
-
-MALLOC_DEFINE(M_80211_CRYPTO, "80211crypto", "802.11 crypto state");
 
 static	int _ieee80211_crypto_delkey(struct ieee80211vap *,
 		struct ieee80211_key *);
@@ -428,7 +425,7 @@ ieee80211_crypto_newkey(struct ieee80211vap *vap,
 static int
 _ieee80211_crypto_delkey(struct ieee80211vap *vap, struct ieee80211_key *key)
 {
-	KASSERT(key->wk_cipher != NULL, ("No cipher!"));
+	IASSERT(key->wk_cipher != NULL, ("No cipher!"));
 
 	IEEE80211_DPRINTF(vap, IEEE80211_MSG_CRYPTO,
 	    "%s: %s keyix %u flags 0x%x rsc %ju tsc %ju len %u\n",
@@ -496,7 +493,7 @@ ieee80211_crypto_setkey(struct ieee80211vap *vap, struct ieee80211_key *key)
 {
 	const struct ieee80211_cipher *cip = key->wk_cipher;
 
-	KASSERT(cip != NULL, ("No cipher!"));
+	IASSERT(cip != NULL, ("No cipher!"));
 
 	IEEE80211_DPRINTF(vap, IEEE80211_MSG_CRYPTO,
 	    "%s: %s keyix %u flags 0x%x mac %s rsc %ju tsc %ju len %u\n",

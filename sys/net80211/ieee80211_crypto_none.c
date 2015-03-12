@@ -48,7 +48,6 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_crypto_none.c,v 1.7 2006/11/16 01:33:40 ch
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 
 #include <net80211/ieee80211_var.h>
 

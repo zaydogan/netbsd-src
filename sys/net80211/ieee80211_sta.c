@@ -56,8 +56,6 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <net/if_media.h>
 #include <net/if_llc.h>
 #include <net/if_dl.h>
-#include <net/if_var.h>
-#include <net/ethernet.h>
 
 #include <net/bpf.h>
 
@@ -119,8 +117,8 @@ sta_beacon_miss(struct ieee80211vap *vap)
 
 	IEEE80211_LOCK_ASSERT(ic);
 
-	KASSERT((ic->ic_flags & IEEE80211_F_SCAN) == 0, ("scanning"));
-	KASSERT(vap->iv_state >= IEEE80211_S_RUN,
+	IASSERT((ic->ic_flags & IEEE80211_F_SCAN) == 0, ("scanning"));
+	IASSERT(vap->iv_state >= IEEE80211_S_RUN,
 	    ("wrong state %s", ieee80211_state_name[vap->iv_state]));
 
 	IEEE80211_DPRINTF(vap, IEEE80211_MSG_STATE | IEEE80211_MSG_DEBUG,
@@ -467,7 +465,7 @@ isdstods_mcastecho(struct ieee80211vap *vap, const struct ieee80211_frame *wh)
 #define	WH4(wh)		((const struct ieee80211_frame_addr4 *)wh)
 	const uint8_t *sa;
 
-	KASSERT(vap->iv_opmode == IEEE80211_M_STA, ("wrong mode"));
+	IASSERT(vap->iv_opmode == IEEE80211_M_STA, ("wrong mode"));
 
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr3))
 		return 0;
@@ -484,7 +482,7 @@ isdstods_mcastecho(struct ieee80211vap *vap, const struct ieee80211_frame *wh)
 static __inline int
 isfromds_mcastecho(struct ieee80211vap *vap, const struct ieee80211_frame *wh)
 {
-	KASSERT(vap->iv_opmode == IEEE80211_M_STA, ("wrong mode"));
+	IASSERT(vap->iv_opmode == IEEE80211_M_STA, ("wrong mode"));
 
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1))
 		return 0;
@@ -534,7 +532,7 @@ sta_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 	uint8_t *bssid;
 	uint16_t rxseq;
 
-	if (m->m_flags & M_AMPDU_MPDU) {
+	if (M_GET_FLAGS(m) & M_AMPDU_MPDU) {
 		/*
 		 * Fastpath for A-MPDU reorder q resubmission.  Frames
 		 * w/ M_AMPDU_MPDU marked have already passed through
@@ -551,7 +549,7 @@ sta_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 		goto resubmit_ampdu;
 	}
 
-	KASSERT(ni != NULL, ("null node"));
+	IASSERT(ni != NULL, ("null node"));
 	ni->ni_inact = ni->ni_inact_reload;
 
 	type = -1;			/* undefined */
@@ -661,7 +659,7 @@ sta_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 		 * will return 0; otherwise it has consumed the mbuf
 		 * and we should do nothing more with it.
 		 */
-		if ((m->m_flags & M_AMPDU) &&
+		if ((M_GET_FLAGS(m) & M_AMPDU) &&
 		    (dir == IEEE80211_FC1_DIR_FROMDS ||
 		     dir == IEEE80211_FC1_DIR_DSTODS) &&
 		    ieee80211_ampdu_reorder(ni, m) != 0) {
@@ -836,7 +834,7 @@ sta_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 			 * any non-PAE frames received without encryption.
 			 */
 			if ((vap->iv_flags & IEEE80211_F_DROPUNENC) &&
-			    (key == NULL && (m->m_flags & M_WEP) == 0) &&
+			    (key == NULL && (M_GET_FLAGS(m) & M_WEP) == 0) &&
 			    eh->ether_type != htons(ETHERTYPE_PAE)) {
 				/*
 				 * Drop unencrypted frames.
@@ -1143,7 +1141,7 @@ ieee80211_parse_csaparams(struct ieee80211vap *vap, uint8_t *frm,
 	const struct ieee80211_csa_ie *csa =
 	    (const struct ieee80211_csa_ie *) frm;
 
-	KASSERT(vap->iv_state >= IEEE80211_S_RUN,
+	IASSERT(vap->iv_state >= IEEE80211_S_RUN,
 	    ("state %s", ieee80211_state_name[vap->iv_state]));
 
 	if (csa->csa_mode > 1) {

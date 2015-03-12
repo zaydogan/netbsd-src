@@ -38,7 +38,6 @@ __KERNEL_RCSID(0, "$NetBSD$");
  * IEEE 802.11 TDMA mode support.
  */
 #include "opt_inet.h"
-#include "opt_tdma.h"
 #include "opt_wlan.h"
 
 #ifdef	IEEE80211_SUPPORT_TDMA
@@ -59,7 +58,6 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <net/if.h>
 #include <net/if_media.h>
 #include <net/if_llc.h>
-#include <net/ethernet.h>
 
 #include <net/bpf.h>
 
@@ -151,7 +149,7 @@ ieee80211_tdma_vattach(struct ieee80211vap *vap)
 {
 	struct ieee80211_tdma_state *ts;
 
-	KASSERT(vap->iv_caps & IEEE80211_C_TDMA,
+	IASSERT(vap->iv_caps & IEEE80211_C_TDMA,
 	     ("not a tdma vap, caps 0x%x", vap->iv_caps));
 
 	ts = (struct ieee80211_tdma_state *) malloc(
@@ -295,8 +293,8 @@ tdma_beacon_miss(struct ieee80211vap *vap)
 
 	IEEE80211_LOCK_ASSERT(vap->iv_ic);
 
-	KASSERT((vap->iv_ic->ic_flags & IEEE80211_F_SCAN) == 0, ("scanning"));
-	KASSERT(vap->iv_state == IEEE80211_S_RUN,
+	IASSERT((vap->iv_ic->ic_flags & IEEE80211_F_SCAN) == 0, ("scanning"));
+	IASSERT(vap->iv_state == IEEE80211_S_RUN,
 	    ("wrong state %d", vap->iv_state));
 
 	IEEE80211_DPRINTF(vap,
@@ -413,7 +411,7 @@ tdma_update(struct ieee80211vap *vap, const struct ieee80211_tdma_param *tdma,
 	struct ieee80211_tdma_state *ts = vap->iv_tdma;
 	int slot, slotlen, update;
 
-	KASSERT(vap->iv_caps & IEEE80211_C_TDMA,
+	IASSERT(vap->iv_caps & IEEE80211_C_TDMA,
 	     ("not a tdma vap, caps 0x%x", vap->iv_caps));
 
 	update = 0;
@@ -527,7 +525,7 @@ tdma_process_params(struct ieee80211_node *ni, const u_int8_t *ie,
 		(const struct ieee80211_tdma_param *) ie;
 	u_int len = ie[1];
 
-	KASSERT(vap->iv_caps & IEEE80211_C_TDMA,
+	IASSERT(vap->iv_caps & IEEE80211_C_TDMA,
 	     ("not a tdma vap, caps 0x%x", vap->iv_caps));
 
 	if (len < sizeof(*tdma) - 2) {
@@ -630,7 +628,7 @@ ieee80211_tdma_getslot(struct ieee80211vap *vap)
 {
 	struct ieee80211_tdma_state *ts = vap->iv_tdma;
 
-	KASSERT(vap->iv_caps & IEEE80211_C_TDMA,
+	IASSERT(vap->iv_caps & IEEE80211_C_TDMA,
 	     ("not a tdma vap, caps 0x%x", vap->iv_caps));
 	return ts->tdma_slot;
 }
@@ -688,7 +686,7 @@ ieee80211_add_tdma(uint8_t *frm, struct ieee80211vap *vap)
 	const struct ieee80211_tdma_state *ts = vap->iv_tdma;
 	uint16_t slotlen;
 
-	KASSERT(vap->iv_caps & IEEE80211_C_TDMA,
+	IASSERT(vap->iv_caps & IEEE80211_C_TDMA,
 	     ("not a tdma vap, caps 0x%x", vap->iv_caps));
 
 	memcpy(frm, &param, sizeof(param));
@@ -715,7 +713,7 @@ ieee80211_tdma_update_beacon(struct ieee80211vap *vap,
 {
 	struct ieee80211_tdma_state *ts = vap->iv_tdma;
 
-	KASSERT(vap->iv_caps & IEEE80211_C_TDMA,
+	IASSERT(vap->iv_caps & IEEE80211_C_TDMA,
 	     ("not a tdma vap, caps 0x%x", vap->iv_caps));
 
 	if (isset(bo->bo_flags,  IEEE80211_BEACON_TDMA)) {

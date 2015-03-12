@@ -57,7 +57,6 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_acl.c,v 1.9 2011/06/12 00:07:19 christos E
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 #include <net/route.h>
 
 #include <net80211/ieee80211_var.h>
@@ -94,8 +93,6 @@ struct aclstate {
 #define	ACL_HASH(addr)	\
 	(((const uint8_t *)(addr))[IEEE80211_ADDR_LEN - 1] % ACL_HASHSIZE)
 
-static MALLOC_DEFINE(M_80211_ACL, "acl", "802.11 station acl");
-
 static	int acl_free_all(struct ieee80211vap *);
 
 /* number of references from net80211 layer */
@@ -124,7 +121,7 @@ acl_detach(struct ieee80211vap *vap)
 {
 	struct aclstate *as = vap->iv_as;
 
-	KASSERT(nrefs > 0, ("imbalanced attach/detach"));
+	IASSERT(nrefs > 0, ("imbalanced attach/detach"));
 	nrefs--;			/* NB: we assume caller locking */
 
 	acl_free_all(vap);

@@ -53,7 +53,6 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_crypto_ccmp.c,v 1.11 2014/10/18 08:33:29 s
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 
 #include <net80211/ieee80211_var.h>
 
@@ -121,7 +120,7 @@ ccmp_detach(struct ieee80211_key *k)
 	struct ccmp_ctx *ctx = k->wk_private;
 
 	free(ctx, M_80211_CRYPTO);
-	KASSERT(nrefs > 0, ("imbalanced attach/detach"));
+	IASSERT(nrefs > 0, ("imbalanced attach/detach"));
 	nrefs--;			/* NB: we assume caller locking */
 }
 
@@ -606,7 +605,7 @@ ccmp_decrypt(struct ieee80211_key *key, u_int64_t pn, struct mbuf *m, int hdrlen
 			pos_next = mtod(m, uint8_t *);
 			len = min(data_len, AES_BLOCK_LEN);
 			space_next = len > space ? len - space : 0;
-			KASSERT(m->m_len >= space_next,
+			IASSERT(m->m_len >= space_next,
 				("not enough data in following buffer, "
 				"m_len %u need %u\n", m->m_len, space_next));
 

@@ -49,8 +49,9 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
-#include <net/ethernet.h>
+#ifdef notyet	/* XXX FBSD80211 vnet */
 #include <net/vnet.h>
+#endif
 
 #include <net80211/ieee80211_var.h>
 #ifdef IEEE80211_SUPPORT_TDMA
@@ -164,6 +165,7 @@ DB_SHOW_COMMAND(com, db_show_com)
 	_db_show_com(ic, showvaps, showsta, showmesh, showprocs);
 }
 
+#ifdef notyet	/* XXX FBSD80211 vnet */
 DB_SHOW_ALL_COMMAND(vaps, db_show_all_vaps)
 {
 	VNET_ITERATOR_DECL(vnet_iter);
@@ -196,6 +198,7 @@ DB_SHOW_ALL_COMMAND(vaps, db_show_all_vaps)
 			}
 	}
 }
+#endif
 
 #ifdef IEEE80211_SUPPORT_MESH
 DB_SHOW_ALL_COMMAND(mesh, db_show_mesh)
@@ -870,7 +873,7 @@ _db_show_ageq(const char *tag, const struct ieee80211_ageq *q)
 	for (m = q->aq_head; m != NULL; m = m->m_nextpkt)
 		db_printf("%s %p (len %d, %b)\n", tag, m, m->m_len,
 		    /* XXX could be either TX or RX but is mostly TX */
-		    m->m_flags, IEEE80211_MBUF_TX_FLAG_BITS);
+		    M_GET_FLAGS(m), IEEE80211_MBUF_TX_FLAG_BITS);
 }
 
 static void

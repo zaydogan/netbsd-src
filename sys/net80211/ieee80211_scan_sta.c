@@ -47,7 +47,6 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <net/if.h>
 #include <net/if_media.h>
-#include <net/ethernet.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_input.h>
@@ -190,7 +189,7 @@ sta_detach(struct ieee80211_scan_state *ss)
 		IEEE80211_SCAN_TABLE_LOCK_DESTROY(st);
 		mtx_destroy(&st->st_scanlock);
 		free(st, M_80211_SCAN);
-		KASSERT(nrefs > 0, ("imbalanced attach/detach"));
+		IASSERT(nrefs > 0, ("imbalanced attach/detach"));
 		nrefs--;		/* NB: we assume caller locking */
 	}
 	return 1;
@@ -274,12 +273,12 @@ found:
 	if (sp->ssid[1] != 0 &&
 	    (ISPROBE(subtype) || ise->se_ssid[1] == 0))
 		memcpy(ise->se_ssid, sp->ssid, 2+sp->ssid[1]);
-	KASSERT(sp->rates[1] <= IEEE80211_RATE_MAXSIZE,
+	IASSERT(sp->rates[1] <= IEEE80211_RATE_MAXSIZE,
 		("rate set too large: %u", sp->rates[1]));
 	memcpy(ise->se_rates, sp->rates, 2+sp->rates[1]);
 	if (sp->xrates != NULL) {
 		/* XXX validate xrates[1] */
-		KASSERT(sp->xrates[1] <= IEEE80211_RATE_MAXSIZE,
+		IASSERT(sp->xrates[1] <= IEEE80211_RATE_MAXSIZE,
 			("xrate set too large: %u", sp->xrates[1]));
 		memcpy(ise->se_xrates, sp->xrates, 2+sp->xrates[1]);
 	} else
@@ -329,7 +328,7 @@ found:
 		/* Demote legacy networks to a non-HT channel. */
 		c = ieee80211_find_channel(ic, ise->se_chan->ic_freq,
 		    ise->se_chan->ic_flags & ~IEEE80211_CHAN_HT);
-		KASSERT(c != NULL,
+		IASSERT(c != NULL,
 		    ("no legacy channel %u", ise->se_chan->ic_ieee));
 		ise->se_chan = c;
 	}
@@ -382,7 +381,7 @@ found:
 	se->se_seen = 1;
 	se->se_notseen = 0;
 
-	KASSERT(sizeof(sp->bchan) == 1, ("bchan size"));
+	IASSERT(sizeof(sp->bchan) == 1, ("bchan size"));
 	if (rssi > st->st_maxrssi[sp->bchan])
 		st->st_maxrssi[sp->bchan] = rssi;
 
@@ -462,7 +461,7 @@ add_channels(struct ieee80211vap *vap,
 	u_int modeflags;
 	int i;
 
-	KASSERT(mode < nitems(chanflags), ("Unexpected mode %u", mode));
+	IASSERT(mode < __arraycount(chanflags), ("Unexpected mode %u", mode));
 	modeflags = chanflags[mode];
 	for (i = 0; i < nfreq; i++) {
 		if (ss->ss_last >= IEEE80211_SCAN_MAX)
@@ -1221,7 +1220,7 @@ sta_pick_bss(struct ieee80211_scan_state *ss, struct ieee80211vap *vap)
 	struct sta_entry *selbs;
 	struct ieee80211_channel *chan;
 
-	KASSERT(vap->iv_opmode == IEEE80211_M_STA,
+	IASSERT(vap->iv_opmode == IEEE80211_M_STA,
 		("wrong mode %u", vap->iv_opmode));
 
 	if (st->st_newscan) {
@@ -1384,7 +1383,7 @@ sta_age(struct ieee80211_scan_state *ss)
 	 * XXX repeater station
 	 * XXX do when !bgscan?
 	 */
-	KASSERT(vap->iv_opmode == IEEE80211_M_STA,
+	IASSERT(vap->iv_opmode == IEEE80211_M_STA,
 		("wrong mode %u", vap->iv_opmode));
 	if (vap->iv_roaming == IEEE80211_ROAMING_AUTO &&
 	    (vap->iv_flags & IEEE80211_F_BGSCAN) &&
@@ -1575,7 +1574,7 @@ adhoc_pick_bss(struct ieee80211_scan_state *ss, struct ieee80211vap *vap)
 	struct ieee80211_channel *chan;
 	struct ieee80211com *ic = vap->iv_ic;
 
-	KASSERT(vap->iv_opmode == IEEE80211_M_IBSS ||
+	IASSERT(vap->iv_opmode == IEEE80211_M_IBSS ||
 		vap->iv_opmode == IEEE80211_M_AHDEMO ||
 		vap->iv_opmode == IEEE80211_M_MBSS,
 		("wrong opmode %u", vap->iv_opmode));
@@ -1784,7 +1783,7 @@ ap_pick_channel(struct ieee80211_scan_state *ss, int flags)
 		/* check channel attributes for band compatibility */
 		if (flags != 0 && (chan->ic_flags & flags) != flags)
 			continue;
-		KASSERT(sizeof(chan->ic_ieee) == 1, ("ic_chan size"));
+		IASSERT(sizeof(chan->ic_ieee) == 1, ("ic_chan size"));
 		/* XXX channel have interference */
 		if (st->st_maxrssi[chan->ic_ieee] == 0) {
 			/* XXX use other considerations */
@@ -1806,7 +1805,7 @@ ap_end(struct ieee80211_scan_state *ss, struct ieee80211vap *vap)
 	struct ieee80211com *ic = vap->iv_ic;
 	struct ieee80211_channel *bestchan;
 
-	KASSERT(vap->iv_opmode == IEEE80211_M_HOSTAP,
+	IASSERT(vap->iv_opmode == IEEE80211_M_HOSTAP,
 		("wrong opmode %u", vap->iv_opmode));
 	bestchan = ap_pick_channel(ss, 0);
 	if (bestchan == NULL) {
@@ -1873,7 +1872,7 @@ mesh_pick_bss(struct ieee80211_scan_state *ss, struct ieee80211vap *vap)
 	struct sta_entry *selbs;
 	struct ieee80211_channel *chan;
 
-	KASSERT(vap->iv_opmode == IEEE80211_M_MBSS,
+	IASSERT(vap->iv_opmode == IEEE80211_M_MBSS,
 		("wrong opmode %u", vap->iv_opmode));
 
 	if (st->st_newscan) {

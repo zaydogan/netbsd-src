@@ -92,10 +92,10 @@ ieee80211_ack_rate(const struct ieee80211_rate_table *rt, uint8_t rate)
 	 * If the caller wishes to use it for a basic rate, they should
 	 * clear the high bit first.
 	 */
-	KASSERT(! (rate & 0x80), ("rate %d is basic/mcs?", rate));
+	IASSERT(! (rate & 0x80), ("rate %d is basic/mcs?", rate));
 
 	uint8_t cix = rt->info[rt->rateCodeToIndex[rate & IEEE80211_RATE_VAL]].ctlRateIndex;
-	KASSERT(cix != (uint8_t)-1, ("rate %d has no info", rate));
+	IASSERT(cix != (uint8_t)-1, ("rate %d has no info", rate));
 	return rt->info[cix].dot11Rate;
 }
 
@@ -107,10 +107,10 @@ ieee80211_ctl_rate(const struct ieee80211_rate_table *rt, uint8_t rate)
 	 * If the caller wishes to use it for a basic rate, they should
 	 * clear the high bit first.
 	 */
-	KASSERT(! (rate & 0x80), ("rate %d is basic/mcs?", rate));
+	IASSERT(! (rate & 0x80), ("rate %d is basic/mcs?", rate));
 
 	uint8_t cix = rt->info[rt->rateCodeToIndex[rate & IEEE80211_RATE_VAL]].ctlRateIndex;
-	KASSERT(cix != (uint8_t)-1, ("rate %d has no info", rate));
+	IASSERT(cix != (uint8_t)-1, ("rate %d has no info", rate));
 	return rt->info[cix].dot11Rate;
 }
 
@@ -122,10 +122,10 @@ ieee80211_rate2phytype(const struct ieee80211_rate_table *rt, uint8_t rate)
 	 * If the caller wishes to use it for a basic rate, they should
 	 * clear the high bit first.
 	 */
-	KASSERT(! (rate & 0x80), ("rate %d is basic/mcs?", rate));
+	IASSERT(! (rate & 0x80), ("rate %d is basic/mcs?", rate));
 
 	uint8_t rix = rt->rateCodeToIndex[rate & IEEE80211_RATE_VAL];
-	KASSERT(rix != (uint8_t)-1, ("rate %d has no info", rate));
+	IASSERT(rix != (uint8_t)-1, ("rate %d has no info", rate));
 	return rt->info[rix].phy;
 }
 
@@ -137,7 +137,7 @@ ieee80211_isratevalid(const struct ieee80211_rate_table *rt, uint8_t rate)
 	 * If the caller wishes to use it for a basic rate, they should
 	 * clear the high bit first.
 	 */
-	KASSERT(! (rate & 0x80), ("rate %d is basic/mcs?", rate));
+	IASSERT(! (rate & 0x80), ("rate %d is basic/mcs?", rate));
 
 	return rt->rateCodeToIndex[rate] != (uint8_t)-1;
 }
@@ -154,13 +154,13 @@ ieee80211_ack_duration(const struct ieee80211_rate_table *rt,
 {
 	uint8_t rix = rt->rateCodeToIndex[rate];
 
-	KASSERT(rix != (uint8_t)-1, ("rate %d has no info", rate));
+	IASSERT(rix != (uint8_t)-1, ("rate %d has no info", rate));
 	if (isShortPreamble) {
-		KASSERT(rt->info[rix].spAckDuration != 0,
+		IASSERT(rt->info[rix].spAckDuration != 0,
 			("shpreamble ack dur is not computed!\n"));
 		return rt->info[rix].spAckDuration;
 	} else {
-		KASSERT(rt->info[rix].lpAckDuration != 0,
+		IASSERT(rt->info[rix].lpAckDuration != 0,
 			("lgpreamble ack dur is not computed!\n"));
 		return rt->info[rix].lpAckDuration;
 	}
