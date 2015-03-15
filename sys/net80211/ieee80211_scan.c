@@ -65,7 +65,7 @@ struct scan_state {
 	unsigned long	ss_scanend;		/* time scan must stop */
 	u_int		ss_duration;		/* duration for next scan */
 	struct task	ss_scan_task;		/* scan execution */
-	struct cv	ss_scan_cv;		/* scan signal */
+	kcondvar_t	ss_scan_cv;		/* scan signal */
 	struct callout	ss_scan_timer;		/* scan timer */
 };
 #define	SCAN_PRIVATE(ss)	((struct scan_state *) ss)
@@ -101,7 +101,7 @@ struct scan_state {
 static	void scan_curchan(struct ieee80211_scan_state *, unsigned long);
 static	void scan_mindwell(struct ieee80211_scan_state *);
 static	void scan_signal(void *);
-static	void scan_task(void *, int);
+static	void scan_task(struct work *, void *);
 
 void
 ieee80211_scan_attach(struct ieee80211com *ic)
@@ -114,7 +114,7 @@ ieee80211_scan_attach(struct ieee80211com *ic)
 		ic->ic_scan = NULL;
 		return;
 	}
-	callout_init_mtx(&ss->ss_scan_timer, IEEE80211_LOCK_OBJ(ic), 0);
+	callout_init(&ss->ss_scan_timer, 0);
 	cv_init(&ss->ss_scan_cv, "scan");
 	TASK_INIT(&ss->ss_scan_task, 0, scan_task, ss);
 	ic->ic_scan = &ss->base;
@@ -135,7 +135,7 @@ ieee80211_scan_detach(struct ieee80211com *ic)
 		scan_signal(ss);
 		IEEE80211_UNLOCK(ic);
 		ieee80211_draintask(ic, &SCAN_PRIVATE(ss)->ss_scan_task);
-		callout_drain(&SCAN_PRIVATE(ss)->ss_scan_timer);
+		callout_halt(&SCAN_PRIVATE(ss)->ss_scan_timer, NULL);
 		IASSERT((ic->ic_flags & IEEE80211_F_SCAN) == 0,
 		    ("scan still running"));
 		if (ss->ss_ops != NULL) {
@@ -843,10 +843,11 @@ scan_mindwell(struct ieee80211_scan_state *ss)
 }
 
 static void
-scan_task(void *arg, int pending)
+scan_task(struct work *work, void *arg)
 {
 #define	ISCAN_REP	(ISCAN_MINDWELL | ISCAN_DISCARD)
-	struct ieee80211_scan_state *ss = (struct ieee80211_scan_state *) arg;
+	struct task *task = (struct task *)work;
+	struct ieee80211_scan_state *ss = task->ta_context;
 	struct ieee80211vap *vap = ss->ss_vap;
 	struct ieee80211com *ic = ss->ss_ic;
 	struct ieee80211_channel *chan;

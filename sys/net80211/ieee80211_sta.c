@@ -53,6 +53,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 #include <net/if_llc.h>
 #include <net/if_dl.h>
@@ -226,7 +227,7 @@ sta_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 	    __func__, ieee80211_state_name[ostate],
 	    ieee80211_state_name[nstate], arg);
 	vap->iv_state = nstate;			/* state transition */
-	callout_stop(&vap->iv_mgtsend);		/* XXX callout_drain */
+	callout_stop(&vap->iv_mgtsend);		/* XXX callout_halt */
 	if (ostate != IEEE80211_S_SCAN)
 		ieee80211_cancel_scan(vap);	/* background scan */
 	ni = vap->iv_bss;			/* NB: no reference held */
@@ -977,7 +978,7 @@ sta_auth_shared(struct ieee80211_node *ni, struct ieee80211_frame *wh,
 {
 	struct ieee80211vap *vap = ni->ni_vap;
 	uint8_t *challenge;
-	int estatus;
+	int estatus __unused;
 
 	/*
 	 * NB: this can happen as we allow pre-shared key
@@ -1105,12 +1106,12 @@ ieee80211_parse_wmeparams(struct ieee80211vap *vap, uint8_t *frm,
 		    wh, "WME", "too short, len %u", len);
 		return -1;
 	}
-	qosinfo = frm[__offsetof(struct ieee80211_wme_param, param_qosInfo)];
+	qosinfo = frm[offsetof(struct ieee80211_wme_param, param_qosInfo)];
 	qosinfo &= WME_QOSINFO_COUNT;
 	/* XXX do proper check for wraparound */
 	if (qosinfo == wme->wme_wmeChanParams.cap_info)
 		return 0;
-	frm += __offsetof(struct ieee80211_wme_param, params_acParams);
+	frm += offsetof(struct ieee80211_wme_param, params_acParams);
 	for (i = 0; i < WME_NUM_AC; i++) {
 		struct wmeParams *wmep =
 			&wme->wme_wmeChanParams.cap_wmeParams[i];

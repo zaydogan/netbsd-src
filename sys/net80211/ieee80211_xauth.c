@@ -62,8 +62,10 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_xauth.c,v 1.5 2006/02/27 01:08:28 dyoung E
 
 #include <net80211/ieee80211_var.h>
 
+#ifdef notyet	/* XXX FBSD80211 module */
 /* XXX number of references from net80211 layer; needed for module code */
 static	int nrefs = 0;
+#endif
 
 /*
  * One module handles everything for now.  May want
@@ -76,7 +78,8 @@ static const struct ieee80211_authenticator xauth = {
 	.ia_node_join	= NULL,
 	.ia_node_leave	= NULL,
 };
-
+#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_AUTH_MODULE(xauth, 1);
 IEEE80211_AUTH_ALG(x8021x, IEEE80211_AUTH_8021X, xauth);
 IEEE80211_AUTH_ALG(wpa, IEEE80211_AUTH_WPA, xauth);
+#endif

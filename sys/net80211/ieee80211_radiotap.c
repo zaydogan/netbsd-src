@@ -122,7 +122,7 @@ ieee80211_radiotap_vattach(struct ieee80211vap *vap)
 
 	if (th != NULL && ic->ic_rh != NULL) {
 		/* radiotap DLT for raw 802.11 frames */
-		bpfattach2(vap->iv_ifp, DLT_IEEE802_11_RADIO,
+		bpf_attach2(vap->iv_ifp, DLT_IEEE802_11_RADIO,
 		    sizeof(struct ieee80211_frame) + le16toh(th->it_len),
 		    &vap->iv_rawbpf);
 	}

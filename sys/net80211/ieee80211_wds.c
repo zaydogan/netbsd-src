@@ -53,6 +53,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 #include <net/if_llc.h>
 
@@ -285,7 +286,7 @@ ieee80211_dwds_mcast(struct ieee80211vap *vap0, struct mbuf *m)
 			continue;
 		}
 
-		BPF_MTAP(ifp, m);		/* 802.3 tx */
+		bpf_mtap(ifp, m);		/* 802.3 tx */
 
 		/*
 		 * Encapsulate the packet in prep for transmission.
@@ -343,7 +344,7 @@ static int
 wds_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 {
 	struct ieee80211com *ic = vap->iv_ic;
-	struct ieee80211_node *ni;
+	struct ieee80211_node *ni __unused;
 	enum ieee80211_state ostate;
 	int error;
 
@@ -353,7 +354,7 @@ wds_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 	IEEE80211_DPRINTF(vap, IEEE80211_MSG_STATE, "%s: %s -> %s\n", __func__,
 		ieee80211_state_name[ostate], ieee80211_state_name[nstate]);
 	vap->iv_state = nstate;			/* state transition */
-	callout_stop(&vap->iv_mgtsend);		/* XXX callout_drain */
+	callout_stop(&vap->iv_mgtsend);		/* XXX callout_halt */
 	if (ostate != IEEE80211_S_SCAN)
 		ieee80211_cancel_scan(vap);	/* background scan */
 	ni = vap->iv_bss;			/* NB: no reference held */

@@ -47,8 +47,10 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_proto.c,v 1.30 2013/01/10 17:40:10 christo
 
 #include <sys/socket.h>
 #include <sys/sockio.h>
+#include <sys/once.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 
 #include <net80211/ieee80211_var.h>
@@ -105,14 +107,14 @@ const char *ieee80211_wme_acnames[] = {
 	"WME_UPSD",
 };
 
-static void beacon_miss(void *, int);
-static void beacon_swmiss(void *, int);
-static void parent_updown(void *, int);
-static void update_mcast(void *, int);
-static void update_promisc(void *, int);
-static void update_channel(void *, int);
-static void update_chw(void *, int);
-static void ieee80211_newstate_cb(void *, int);
+static void beacon_miss(struct work *, void *);
+static void beacon_swmiss(struct work *, void *);
+static void parent_updown(struct work *, void *);
+static void update_mcast(struct work *, void *);
+static void update_promisc(struct work *, void *);
+static void update_channel(struct work *, void *);
+static void update_chw(struct work *, void *);
+static void ieee80211_newstate_cb(struct work *, void *);
 
 static int
 null_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
@@ -199,7 +201,7 @@ ieee80211_proto_vattach(struct ieee80211vap *vap)
 	vap->iv_rtsthreshold = IEEE80211_RTS_DEFAULT;
 	vap->iv_fragthreshold = IEEE80211_FRAG_DEFAULT;
 	vap->iv_bmiss_max = IEEE80211_BMISS_MAX;
-	callout_init_mtx(&vap->iv_swbmiss, IEEE80211_LOCK_OBJ(ic), 0);
+	callout_init(&vap->iv_swbmiss, 0);
 	callout_init(&vap->iv_mgtsend, CALLOUT_MPSAFE);
 	TASK_INIT(&vap->iv_nstate_task, 0, ieee80211_newstate_cb, vap);
 	TASK_INIT(&vap->iv_swbmiss_task, 0, beacon_swmiss, vap);
@@ -312,18 +314,33 @@ static const struct ieee80211_authenticator auth_internal = {
 /*
  * Setup internal authenticators once; they are never unregistered.
  */
-static void
-ieee80211_auth_setup(void)
+static int
+ieee80211_auth_setup0(void)
 {
 	ieee80211_authenticator_register(IEEE80211_AUTH_OPEN, &auth_internal);
 	ieee80211_authenticator_register(IEEE80211_AUTH_SHARED, &auth_internal);
 	ieee80211_authenticator_register(IEEE80211_AUTH_AUTO, &auth_internal);
+
+	return 0;
 }
+#ifdef notyet	/* XXX FBSD80211 sysinit */
 SYSINIT(wlan_auth, SI_SUB_DRIVERS, SI_ORDER_FIRST, ieee80211_auth_setup, NULL);
+#else
+static void
+ieee80211_auth_setup(void)
+{
+	static ONCE_DECL(ieee80211_auth_init_once);
+
+	RUN_ONCE(&ieee80211_auth_init_once, ieee80211_auth_setup0);
+}
+#endif
 
 const struct ieee80211_authenticator *
 ieee80211_authenticator_get(int auth)
 {
+#ifdef __NetBSD__
+	ieee80211_auth_setup();
+#endif
 	if (auth >= IEEE80211_AUTH_MAX)
 		return NULL;
 	if (authenticators[auth] == NULL)
@@ -1159,44 +1176,49 @@ ieee80211_wme_updateparams(struct ieee80211vap *vap)
 }
 
 static void
-parent_updown(void *arg, int npending)
+parent_updown(struct work *work, void *arg)
 {
-	struct ifnet *parent = arg;
+	struct task *task = (struct task *)work;
+	struct ifnet *parent = task->ta_context;
 
 	parent->if_ioctl(parent, SIOCSIFFLAGS, NULL);
 }
 
 static void
-update_mcast(void *arg, int npending)
+update_mcast(struct work *work, void *arg)
 {
-	struct ieee80211com *ic = arg;
+	struct task *task = (struct task *)work;
+	struct ieee80211com *ic = task->ta_context;
 	struct ifnet *parent = ic->ic_ifp;
 
 	ic->ic_update_mcast(parent);
 }
 
 static void
-update_promisc(void *arg, int npending)
+update_promisc(struct work *work, void *arg)
 {
-	struct ieee80211com *ic = arg;
+	struct task *task = (struct task *)work;
+	struct ieee80211com *ic = task->ta_context;
 	struct ifnet *parent = ic->ic_ifp;
 
 	ic->ic_update_promisc(parent);
 }
 
 static void
-update_channel(void *arg, int npending)
+update_channel(struct work *work, void *arg)
 {
-	struct ieee80211com *ic = arg;
+	struct task *task = (struct task *)work;
+	struct ieee80211com *ic = task->ta_context;
 
 	ic->ic_set_channel(ic);
 	ieee80211_radiotap_chan_change(ic);
 }
 
 static void
-update_chw(void *arg, int npending)
+update_chw(struct work *work, void *arg)
 {
-	struct ieee80211com *ic = arg;
+	struct task *task = (struct task *)work;
+	struct ieee80211com *ic = task->ta_context;
 
 	/*
 	 * XXX should we defer the channel width _config_ update until now?
@@ -1212,14 +1234,14 @@ update_chw(void *arg, int npending)
 void
 ieee80211_waitfor_parent(struct ieee80211com *ic)
 {
-	taskqueue_block(ic->ic_tq);
+	workqueue_block(ic->ic_tq);
 	ieee80211_draintask(ic, &ic->ic_parent_task);
 	ieee80211_draintask(ic, &ic->ic_mcast_task);
 	ieee80211_draintask(ic, &ic->ic_promisc_task);
 	ieee80211_draintask(ic, &ic->ic_chan_task);
 	ieee80211_draintask(ic, &ic->ic_bmiss_task);
 	ieee80211_draintask(ic, &ic->ic_chw_task);
-	taskqueue_unblock(ic->ic_tq);
+	workqueue_unblock(ic->ic_tq);
 }
 
 /*
@@ -1240,7 +1262,7 @@ ieee80211_start_locked(struct ieee80211vap *vap)
 		IEEE80211_MSG_STATE | IEEE80211_MSG_DEBUG,
 		"start running, %d vaps running\n", ic->ic_nrunning);
 
-	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0) {
+	if ((ifp->if_flags & IFF_RUNNING) == 0) {
 		/*
 		 * Mark us running.  Note that it's ok to do this first;
 		 * if we need to bring the parent device up we defer that
@@ -1249,13 +1271,13 @@ ieee80211_start_locked(struct ieee80211vap *vap)
 		 * through ieee80211_start_all at which point we'll come
 		 * back in here and complete the work.
 		 */
-		ifp->if_drv_flags |= IFF_DRV_RUNNING;
+		ifp->if_flags |= IFF_RUNNING;
 		/*
 		 * We are not running; if this we are the first vap
 		 * to be brought up auto-up the parent if necessary.
 		 */
 		if (ic->ic_nrunning++ == 0 &&
-		    (parent->if_drv_flags & IFF_DRV_RUNNING) == 0) {
+		    (parent->if_flags & IFF_RUNNING) == 0) {
 			IEEE80211_DPRINTF(vap,
 			    IEEE80211_MSG_STATE | IEEE80211_MSG_DEBUG,
 			    "%s: up parent %s\n", __func__, parent->if_xname);
@@ -1268,7 +1290,7 @@ ieee80211_start_locked(struct ieee80211vap *vap)
 	 * If the parent is up and running, then kick the
 	 * 802.11 state machine as appropriate.
 	 */
-	if ((parent->if_drv_flags & IFF_DRV_RUNNING) &&
+	if ((parent->if_flags & IFF_RUNNING) &&
 	    vap->iv_roaming != IEEE80211_ROAMING_MANUAL) {
 		if (vap->iv_opmode == IEEE80211_M_STA) {
 #if 0
@@ -1362,10 +1384,10 @@ ieee80211_stop_locked(struct ieee80211vap *vap)
 	    "stop running, %d vaps running\n", ic->ic_nrunning);
 
 	ieee80211_new_state_locked(vap, IEEE80211_S_INIT, -1);
-	if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
-		ifp->if_drv_flags &= ~IFF_DRV_RUNNING;	/* mark us stopped */
+	if (ifp->if_flags & IFF_RUNNING) {
+		ifp->if_flags &= ~IFF_RUNNING;	/* mark us stopped */
 		if (--ic->ic_nrunning == 0 &&
-		    (parent->if_drv_flags & IFF_DRV_RUNNING)) {
+		    (parent->if_flags & IFF_RUNNING)) {
 			IEEE80211_DPRINTF(vap,
 			    IEEE80211_MSG_STATE | IEEE80211_MSG_DEBUG,
 			    "down parent %s\n", parent->if_xname);
@@ -1458,9 +1480,10 @@ ieee80211_beacon_miss(struct ieee80211com *ic)
 }
 
 static void
-beacon_miss(void *arg, int npending)
+beacon_miss(struct work *work, void *arg)
 {
-	struct ieee80211com *ic = arg;
+	struct task *task = (struct task *)work;
+	struct ieee80211com *ic = task->ta_context;
 	struct ieee80211vap *vap;
 
 	IEEE80211_LOCK(ic);
@@ -1479,9 +1502,10 @@ beacon_miss(void *arg, int npending)
 }
 
 static void
-beacon_swmiss(void *arg, int npending)
+beacon_swmiss(struct work *work, void *arg)
 {
-	struct ieee80211vap *vap = arg;
+	struct task *task = (struct task *)work;
+	struct ieee80211vap *vap = task->ta_context;
 	struct ieee80211com *ic = vap->iv_ic;
 
 	IEEE80211_LOCK(ic);
@@ -1503,7 +1527,7 @@ ieee80211_swbmiss(void *arg)
 	struct ieee80211vap *vap = arg;
 	struct ieee80211com *ic = vap->iv_ic;
 
-	IEEE80211_LOCK_ASSERT(ic);
+	IEEE80211_LOCK(ic);
 
 	/* XXX sleep state? */
 	IASSERT(vap->iv_state == IEEE80211_S_RUN,
@@ -1528,6 +1552,8 @@ ieee80211_swbmiss(void *arg)
 		vap->iv_swbmiss_count = 0;
 	callout_reset(&vap->iv_swbmiss, vap->iv_swbmiss_period,
 		ieee80211_swbmiss, vap);
+
+	IEEE80211_UNLOCK(ic);
 }
 
 /*
@@ -1719,9 +1745,10 @@ wakeupwaiting(struct ieee80211vap *vap0)
  * Handle post state change work common to all operating modes.
  */
 static void
-ieee80211_newstate_cb(void *xvap, int npending)
+ieee80211_newstate_cb(struct work *work, void *xvap)
 {
-	struct ieee80211vap *vap = xvap;
+	struct task *task = work->wk_dummy;
+	struct ieee80211vap *vap = task->ta_context;
 	struct ieee80211com *ic = vap->iv_ic;
 	enum ieee80211_state nstate, ostate;
 	int arg, rc;
@@ -1788,7 +1815,7 @@ ieee80211_newstate_cb(void *xvap, int npending)
 		 * Note this can also happen as a result of SLEEP->RUN
 		 * (i.e. coming out of power save mode).
 		 */
-		vap->iv_ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
+		vap->iv_ifp->if_flags &= ~IFF_OACTIVE;
 
 		/*
 		 * XXX TODO Kick-start a VAP queue - this should be a method!

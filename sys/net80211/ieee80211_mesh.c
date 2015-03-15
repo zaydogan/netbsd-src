@@ -374,11 +374,7 @@ mesh_rt_del(struct ieee80211_mesh_state *ms, struct ieee80211_mesh_route *rt)
 	 * is holding the route.
 	 */
 	RT_ENTRY_LOCK(rt);
-#ifdef notyet	/* XXX FBSD80211 callout drain */
-	callout_drain(&rt->rt_discovery);
-#else
-	callout_stop(&rt->rt_discovery);
-#endif
+	callout_halt(&rt->rt_discovery, NULL);
 	mutex_destroy(&rt->rt_lock);
 	free(rt, M_80211_MESH_RT);
 }
@@ -545,11 +541,7 @@ mesh_gatemode_setup(struct ieee80211vap *vap)
 	 */
 	if (ms->ms_flags & IEEE80211_MESHFLAGS_ROOT ||
 	    (ms->ms_flags & IEEE80211_MESHFLAGS_GATE) == 0) {
-#ifdef notyet	/* XXX FBSD80211 callout drain */
-		callout_drain(&ms->ms_gatetimer);
-#else
-		callout_stop(&ms->ms_gatetimer);
-#endif
+		callout_halt(&ms->ms_gatetimer, NULL);
 		return ;
 	}
 	callout_reset(&ms->ms_gatetimer, ieee80211_mesh_gateint,
@@ -677,11 +669,7 @@ mesh_vdetach_peers(void *arg, struct ieee80211_node *ni)
 		    IEEE80211_ACTION_MESHPEERING_CLOSE,
 		    args);
 	}
-#ifdef notyet	/* XXX FBSD80211 callout drain */
-	callout_drain(&ni->ni_mltimer);
-#else
-	callout_stop(&ni->ni_mltimer);
-#endif
+	callout_halt(&ni->ni_mltimer, NULL);
 	/* XXX belongs in hwmp */
 	ieee80211_ageq_drain_node(&ic->ic_stageq,
 	   (void *)(uintptr_t) ieee80211_mac_hash(ic, ni->ni_macaddr));
@@ -692,11 +680,7 @@ mesh_vdetach(struct ieee80211vap *vap)
 {
 	struct ieee80211_mesh_state *ms = vap->iv_mesh;
 
-#ifdef notyet	/* XXX FBSD80211 callout drain */
-	callout_drain(&ms->ms_cleantimer);
-#else
-	callout_stop(&ms->ms_cleantimer);
-#endif
+	callout_halt(&ms->ms_cleantimer, NULL);
 	ieee80211_iterate_nodes(&vap->iv_ic->ic_sta, mesh_vdetach_peers,
 	    NULL);
 	ieee80211_mesh_rt_flush(vap);
@@ -760,13 +744,8 @@ mesh_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		ieee80211_cancel_scan(vap);	/* background scan */
 	ni = vap->iv_bss;			/* NB: no reference held */
 	if (nstate != IEEE80211_S_RUN && ostate == IEEE80211_S_RUN) {
-#ifdef notyet	/* XXX FBSD80211 callout drain */
-		callout_drain(&ms->ms_cleantimer);
-		callout_drain(&ms->ms_gatetimer);
-#else
-		callout_stop(&ms->ms_cleantimer);
-		callout_stop(&ms->ms_gatetimer);
-#endif
+		callout_halt(&ms->ms_cleantimer, NULL);
+		callout_halt(&ms->ms_gatetimer, NULL);
 	}
 	switch (nstate) {
 	case IEEE80211_S_INIT:
@@ -3089,11 +3068,7 @@ mesh_peer_timeout_backoff(struct ieee80211_node *ni)
 static __inline void
 mesh_peer_timeout_stop(struct ieee80211_node *ni)
 {
-#ifdef notyet	/* XXX FBSD80211 callout drain */
-	callout_drain(&ni->ni_mltimer);
-#else
-	callout_stop(&ni->ni_mltimer);
-#endif
+	callout_halt(&ni->ni_mltimer, NULL);
 }
 
 static void
@@ -3451,13 +3426,8 @@ ieee80211_mesh_node_cleanup(struct ieee80211_node *ni)
 	struct ieee80211vap *vap = ni->ni_vap;
 	struct ieee80211_mesh_state *ms = vap->iv_mesh;
 
-#ifdef notyet	/* XXX FBSD80211 callout drain */
-	callout_drain(&ni->ni_mltimer);
-	callout_drain(&ni->ni_mlhtimer);
-#else
-	callout_stop(&ni->ni_mltimer);
-	callout_stop(&ni->ni_mlhtimer);
-#endif
+	callout_halt(&ni->ni_mltimer, NULL);
+	callout_halt(&ni->ni_mlhtimer, NULL);
 	/* NB: short-circuit callbacks after mesh_vdetach */
 	if (vap->iv_mesh != NULL)
 		ms->ms_ppath->mpp_peerdown(ni);

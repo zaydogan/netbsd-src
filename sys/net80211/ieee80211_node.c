@@ -139,9 +139,7 @@ void
 ieee80211_node_detach(struct ieee80211com *ic)
 {
 
-#ifdef notyet	/* XXX FBSD80211 callout drain */
-	callout_drain(&ic->ic_inact);
-#endif
+	callout_halt(&ic->ic_inact, NULL);
 	ieee80211_node_table_cleanup(&ic->ic_sta);
 	ieee80211_ageq_cleanup(&ic->ic_stageq);
 }

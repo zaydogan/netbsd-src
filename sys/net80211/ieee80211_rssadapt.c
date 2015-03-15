@@ -91,11 +91,13 @@ static void	rssadapt_raise_rate(struct ieee80211_rssadapt_node *,
 static void	rssadapt_tx_complete(const struct ieee80211vap *,
     			const struct ieee80211_node *, int,
 			void *, void *);
+#ifdef notyet	/* XXX FBSD80211 sysctl */
 static void	rssadapt_sysctlattach(struct ieee80211vap *,
 			struct sysctl_ctx_list *, struct sysctl_oid *);
 
 /* number of references from net80211 layer */
 static	int nrefs = 0;
+#endif
 
 static const struct ieee80211_ratectl rssadapt = {
 	.ir_name	= "rssadapt",
@@ -110,8 +112,10 @@ static const struct ieee80211_ratectl rssadapt = {
 	.ir_tx_update	= NULL,
 	.ir_setinterval	= rssadapt_setinterval,
 };
+#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_RATECTL_MODULE(rssadapt, 1);
 IEEE80211_RATECTL_ALG(rssadapt, IEEE80211_RATECTL_RSSADAPT, rssadapt);
+#endif
 
 static void
 rssadapt_setinterval(const struct ieee80211vap *vap, int msecs)
@@ -141,7 +145,9 @@ rssadapt_init(struct ieee80211vap *vap)
 	}
 	rs->vap = vap;
 	rssadapt_setinterval(vap, 500 /* msecs */);
+#ifdef notyet	/* XXX FBSD80211 sysctl */
 	rssadapt_sysctlattach(vap, vap->iv_sysctl, vap->iv_oid);
+#endif
 }
 
 static void
@@ -328,6 +334,7 @@ rssadapt_tx_complete(const struct ieee80211vap *vap,
 	}
 }
 
+#ifdef notyet	/* XXX FBSD80211 sysctl */
 static int
 rssadapt_sysctl_interval(SYSCTL_HANDLER_ARGS)
 {
@@ -352,3 +359,4 @@ rssadapt_sysctlattach(struct ieee80211vap *vap,
 	    "rssadapt_rate_interval", CTLTYPE_INT | CTLFLAG_RW, vap,
 	    0, rssadapt_sysctl_interval, "I", "rssadapt operation interval (ms)");
 }
+#endif

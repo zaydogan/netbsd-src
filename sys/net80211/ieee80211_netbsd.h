@@ -30,6 +30,7 @@
 
 #ifdef _KERNEL
 #include <sys/param.h>
+#include <sys/kmem.h>
 #include <sys/lock.h>
 #include <sys/mbuf.h>
 #include <sys/mutex.h>
@@ -561,6 +562,28 @@ typedef int ieee80211_ioctl_setfunc(struct ieee80211vap *,
 SET_DECLARE(ieee80211_ioctl_setset, ieee80211_ioctl_setfunc);
 #define	IEEE80211_IOCTL_SET(_name, _set) TEXT_SET(ieee80211_ioctl_setset, _set)
 #endif
+
+#ifdef __NetBSD__
+/*
+ * FreeBSD task sim
+ */
+struct task {
+	struct work	ta_work;
+	void		(*ta_func)(struct work *, void *);
+	void		*ta_context;
+};
+
+static __inline void
+TASK_INIT(struct task *task, int priority, void (*func)(struct work *, void *),
+    void *context)
+{
+
+	task->ta_func = func;
+	task->ta_context = context;
+}
+
+#define	IF_LLADDR(ifp)	((ifp)->if_sadl)
+#endif	/* __NetBSD__ */
 #endif /* _KERNEL */
 
 /* XXX this stuff belongs elsewhere */

@@ -107,7 +107,7 @@ struct sta_table {
 	ieee80211_scan_table_lock_t st_lock;	/* on scan table */
 	TAILQ_HEAD(, sta_entry) st_entry;	/* all entries */
 	LIST_HEAD(, sta_entry) st_hash[STA_HASHSIZE];
-	struct mtx	st_scanlock;		/* on st_scaniter */
+	kmutex_t	st_scanlock;		/* on st_scaniter */
 	u_int		st_scaniter;		/* gen# for iterator */
 	u_int		st_scangen;		/* scan generation # */
 	int		st_newscan;
@@ -169,7 +169,7 @@ sta_attach(struct ieee80211_scan_state *ss)
 	if (st == NULL)
 		return 0;
 	IEEE80211_SCAN_TABLE_LOCK_INIT(st, "scantable");
-	mtx_init(&st->st_scanlock, "scangen", "802.11 scangen", MTX_DEF);
+	mutex_init(&st->st_scanlock, MUTEX_DEFAULT, IPL_NET);
 	TAILQ_INIT(&st->st_entry);
 	ss->ss_priv = st;
 	nrefs++;			/* NB: we assume caller locking */
@@ -187,7 +187,7 @@ sta_detach(struct ieee80211_scan_state *ss)
 	if (st != NULL) {
 		sta_flush_table(st);
 		IEEE80211_SCAN_TABLE_LOCK_DESTROY(st);
-		mtx_destroy(&st->st_scanlock);
+		mutex_destroy(&st->st_scanlock);
 		free(st, M_80211_SCAN);
 		IASSERT(nrefs > 0, ("imbalanced attach/detach"));
 		nrefs--;		/* NB: we assume caller locking */
@@ -1404,7 +1404,7 @@ sta_iterate(struct ieee80211_scan_state *ss,
 	struct sta_entry *se;
 	u_int gen;
 
-	mtx_lock(&st->st_scanlock);
+	mutex_enter(&st->st_scanlock);
 	gen = st->st_scaniter++;
 restart:
 	IEEE80211_SCAN_TABLE_LOCK(st);
@@ -1420,7 +1420,7 @@ restart:
 	}
 	IEEE80211_SCAN_TABLE_UNLOCK(st);
 
-	mtx_unlock(&st->st_scanlock);
+	mutex_exit(&st->st_scanlock);
 }
 
 static void
@@ -1474,7 +1474,9 @@ static const struct ieee80211_scanner sta_default = {
 	.scan_assoc_fail	= sta_assoc_fail,
 	.scan_assoc_success	= sta_assoc_success,
 };
+#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_SCANNER_ALG(sta, IEEE80211_M_STA, sta_default);
+#endif
 
 /*
  * Adhoc mode-specific support.
@@ -1622,7 +1624,6 @@ notfound:
 			} else
 				chan = vap->iv_des_chan;
 			if (chan != NULL) {
-				struct ieee80211com *ic = vap->iv_ic;
 				/*
 				 * Create a HT capable IBSS; the per-node
 				 * probe request/response will result in
@@ -1704,8 +1705,10 @@ static const struct ieee80211_scanner adhoc_default = {
 	.scan_assoc_fail	= sta_assoc_fail,
 	.scan_assoc_success	= sta_assoc_success,
 };
+#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_SCANNER_ALG(ibss, IEEE80211_M_IBSS, adhoc_default);
 IEEE80211_SCANNER_ALG(ahdemo, IEEE80211_M_AHDEMO, adhoc_default);
+#endif
 
 static void
 ap_force_promisc(struct ieee80211com *ic)
@@ -1857,7 +1860,9 @@ static const struct ieee80211_scanner ap_default = {
 	.scan_assoc_success	= sta_assoc_success,
 	.scan_assoc_fail	= sta_assoc_fail,
 };
+#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_SCANNER_ALG(ap, IEEE80211_M_HOSTAP, ap_default);
+#endif
 
 #ifdef IEEE80211_SUPPORT_MESH
 /*
@@ -1960,5 +1965,7 @@ static const struct ieee80211_scanner mesh_default = {
 	.scan_assoc_fail	= sta_assoc_fail,
 	.scan_assoc_success	= sta_assoc_success,
 };
+#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_SCANNER_ALG(mesh, IEEE80211_M_MBSS, mesh_default);
+#endif
 #endif /* IEEE80211_SUPPORT_MESH */
