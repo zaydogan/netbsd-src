@@ -84,8 +84,8 @@ struct ieee80211_rx_stats {
 					/* per-chain, per-pilot EVM values */
 };
 
-#define	ieee80211_input(ni, m, rssi, nf) \
-	((ni)->ni_vap->iv_input(ni, m, rssi, nf))
+#define	ieee80211_input(ni, m, rssi, rstamp) \
+	((ni)->ni_vap->iv_input(ni, m, rssi, rstamp))
 int	ieee80211_input_all(struct ieee80211com *, struct mbuf *, int, int);
 
 int	ieee80211_input_mimo(struct ieee80211_node *, struct mbuf *,

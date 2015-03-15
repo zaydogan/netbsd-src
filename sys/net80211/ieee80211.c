@@ -88,6 +88,15 @@ const int ieee80211_opcap[IEEE80211_OPMODE_MAX] = {
 #endif
 };
 
+const struct ieee80211_rateset ieee80211_std_rateset_11a =
+	{ 8, { 12, 18, 24, 36, 48, 72, 96, 108 } };
+
+const struct ieee80211_rateset ieee80211_std_rateset_11b =
+	{ 4, { 2, 4, 11, 22 } };
+
+const struct ieee80211_rateset ieee80211_std_rateset_11g =
+	{ 12, { 2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108 } };
+
 static const uint8_t ieee80211broadcastaddr[IEEE80211_ADDR_LEN] =
 	{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
