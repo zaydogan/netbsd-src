@@ -169,6 +169,7 @@ struct ieee80211_qosframe_addr4 {
 #define	IEEE80211_FC1_PWR_MGT			0x10
 #define	IEEE80211_FC1_MORE_DATA			0x20
 #define	IEEE80211_FC1_PROTECTED			0x40
+#define	IEEE80211_FC1_WEP			IEEE80211_FC1_PROTECTED
 #define	IEEE80211_FC1_ORDER			0x80
 
 #define	IEEE80211_SEQ_FRAG_MASK			0x000f
@@ -209,11 +210,16 @@ struct ieee80211_qosframe_addr4 {
 #define IEEE80211_QOS_RSPI			0x04
 /* bits 11 to 15 reserved */
 
+static __inline int
+ieee80211_has_qos(const struct ieee80211_frame *wh)
+{
+	return (wh->i_fc[0] &
+	    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
+	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS);
+}
+
 /* does frame have QoS sequence control data */
-#define	IEEE80211_QOS_HAS_SEQ(wh) \
-	(((wh)->i_fc[0] & \
-	  (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) == \
-	  (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS))
+#define	IEEE80211_QOS_HAS_SEQ(wh)	ieee80211_has_qos(wh)
 
 /*
  * WME/802.11e information element.
