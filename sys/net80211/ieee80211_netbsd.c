@@ -395,6 +395,19 @@ ieee80211_flush_ifq(struct ifqueue *ifq, struct ieee80211vap *vap)
 	IFQ_UNLOCK(ifq);	/* XXX FBSD80211 ifqueue */
 }
 
+void
+if_printf(struct ifnet *ifp, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+
+	printf("%s: ", ifp->if_xname);
+	vprintf(fmt, ap);
+
+	va_end(ap);
+	return;
+}
+
 /*
  * As above, for mbufs allocated with m_gethdr/MGETHDR
  * or initialized by M_COPY_PKTHDR.
