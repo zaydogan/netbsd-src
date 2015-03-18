@@ -18,9 +18,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* XXX Added for NetBSD */
-#define IEEE80211_NO_HT
-
 struct iwn_rx_radiotap_header {
 	struct ieee80211_radiotap_header wr_ihdr;
 	uint64_t	wr_tsft;
@@ -46,7 +43,6 @@ struct iwn_tx_radiotap_header {
 	uint8_t		wt_rate;
 	uint16_t	wt_chan_freq;
 	uint16_t	wt_chan_flags;
-	uint8_t		wt_hwqueue;
 } __packed;
 
 #define IWN_TX_RADIOTAP_PRESENT						\
@@ -81,6 +77,7 @@ struct iwn_tx_ring {
 	int			qid;
 	int			queued;
 	int			cur;
+	int			read;
 };
 
 #define	IWN_RBUF_COUNT	(IWN_RX_RING_COUNT + 32)
@@ -115,10 +112,13 @@ struct iwn_rx_ring {
 
 struct iwn_node {
 	struct	ieee80211_node		ni;	/* must be the first */
-	struct	ieee80211_amrr_node	amn;
 	uint16_t			disable_tid;
 	uint8_t				id;
-	uint8_t				ridx[IEEE80211_RATE_MAXSIZE];
+	struct {
+		uint64_t		bitmap;
+		int			startidx;
+		int			nframes;
+	} agg[IEEE80211_TID_SIZE];
 };
 
 struct iwn_calib_state {
@@ -191,23 +191,29 @@ struct iwn_ops {
 			    int);
 	void		(*tx_done)(struct iwn_softc *, struct iwn_rx_desc *,
 			    struct iwn_rx_data *);
-#ifndef IEEE80211_NO_HT
 	void		(*ampdu_tx_start)(struct iwn_softc *,
-			    struct ieee80211_node *, uint8_t, uint16_t);
-	void		(*ampdu_tx_stop)(struct iwn_softc *, uint8_t,
+			    struct ieee80211_node *, int, uint8_t, uint16_t);
+	void		(*ampdu_tx_stop)(struct iwn_softc *, int, uint8_t,
 			    uint16_t);
-#endif
 };
+
+struct iwn_vap {
+	struct ieee80211vap	iv_vap;
+	uint8_t			iv_ridx;
+
+	int			(*iv_newstate)(struct ieee80211vap *,
+				    enum ieee80211_state, int);
+	int			beacon_int;
+	uint8_t			macaddr[IEEE80211_ADDR_LEN];
+};
+#define	IWN_VAP(_vap)	((struct iwn_vap *)(_vap))
 
 struct iwn_softc {
 	device_t		sc_dev;
 
 	struct ethercom		sc_ec;
 	struct ieee80211com	sc_ic;
-	int			(*sc_newstate)(struct ieee80211com *,
-				    enum ieee80211_state, int);
 
-	struct ieee80211_amrr	amrr;
 	uint8_t			fixed_ridx;
 
 	bus_dma_tag_t		sc_dmat;
@@ -221,8 +227,7 @@ struct iwn_softc {
 #define IWN_FLAG_HAS_11N	(1 << 6)
 #define IWN_FLAG_ENH_SENS	(1 << 7)
 /* Added for NetBSD */
-#define IWN_FLAG_SCANNING	(1 << 8)
-#define IWN_FLAG_HW_INITED	(1 << 9)
+#define IWN_FLAG_HW_INITED	(1 << 8)
 
 	uint8_t 		hw_type;
 
@@ -231,6 +236,7 @@ struct iwn_softc {
 	const struct iwn_sensitivity_limits
 				*limits;
 	int			ntxqs;
+	int			firstaggqueue;
 	int			ndmachnls;
 	uint8_t			broadcast_id;
 	int			rxonsz;
@@ -269,9 +275,11 @@ struct iwn_softc {
 	int			sc_cap_off;	/* PCIe Capabilities. */
 	struct sysmon_envsys	*sc_sme;
 	envsys_data_t		sc_sensor;
+
 	callout_t		calib_to;
 	int			calib_cnt;
 	struct iwn_calib_state	calib;
+	callout_t		watchdog_to;
 
 	struct iwn_fw_info	fw;
 	struct iwn_calib_info	calibcmd[5];
@@ -289,6 +297,7 @@ struct iwn_softc {
 	uint32_t		prom_base;
 	struct iwn4965_eeprom_band
 				bands[IWN_NBANDS];
+	struct iwn_eeprom_chan	eeprom_channels[IWN_NBANDS][IWN_MAX_CHAN_PER_BAND];
 	uint16_t		rfcfg;
 	uint8_t			calib_ver;
 	char			eeprom_domain[4];
@@ -299,7 +308,6 @@ struct iwn_softc {
 	int8_t			maxpwr2GHz;
 	int8_t			maxpwr5GHz;
 	int8_t			maxpwr[IEEE80211_CHAN_MAX];
-	int8_t			enh_maxpwr[35];
 
 	uint8_t			reset_noise_gain;
 	uint8_t			noise_gain;
@@ -317,23 +325,34 @@ struct iwn_softc {
 	int			sc_tx_timer;
 	void			*powerhook;
 
-	struct bpf_if *		sc_drvbpf;
+	struct ieee80211_tx_ampdu *qid2tap[IWN5000_NTXQUEUES];
+
+	int			(*sc_ampdu_rx_start)(struct ieee80211_node *,
+				    struct ieee80211_rx_ampdu *, int, int, int);
+	void			(*sc_ampdu_rx_stop)(struct ieee80211_node *,
+				    struct ieee80211_rx_ampdu *);
+	int			(*sc_addba_request)(struct ieee80211_node *,
+				    struct ieee80211_tx_ampdu *, int, int, int);
+	int			(*sc_addba_response)(struct ieee80211_node *,
+				    struct ieee80211_tx_ampdu *, int, int, int);
+	void			(*sc_addba_stop)(struct ieee80211_node *,
+				    struct ieee80211_tx_ampdu *);
 
 	union {
 		struct iwn_rx_radiotap_header th;
 		uint8_t	pad[IEEE80211_RADIOTAP_HDRLEN];
 	} sc_rxtapu;
 #define sc_rxtap	sc_rxtapu.th
-	int			sc_rxtap_len;
 
 	union {
 		struct iwn_tx_radiotap_header th;
 		uint8_t	pad[IEEE80211_RADIOTAP_HDRLEN];
 	} sc_txtapu;
 #define sc_txtap	sc_txtapu.th
-	int			sc_txtap_len;
 
 	kmutex_t		sc_mtx;         /* mutex for init/stop */
-
 };
 
+#define IWN_LOCK(_sc)			mutex_enter(&(_sc)->sc_mtx)
+#define IWN_LOCK_ASSERT(_sc)		mutex_owned(&(_sc)->sc_mtx)
+#define IWN_UNLOCK(_sc)			mutex_exit(&(_sc)->sc_mtx)
