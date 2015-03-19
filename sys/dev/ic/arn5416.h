@@ -28,7 +28,7 @@
 #ifndef _IF_ARN5416_H_
 #define _IF_ARN5416_H_
 
-int	ar5416_attach(struct athn_softc *);
+int	ar5416_attach(struct athn_softc *, uint8_t []);
 int	ar5416_init_calib(struct athn_softc *,
 	    struct ieee80211_channel *, struct ieee80211_channel *);
 uint8_t	ar5416_get_rf_rev(struct athn_softc *);

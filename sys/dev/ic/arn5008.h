@@ -30,7 +30,7 @@
 
 #include <dev/ic/arn5008reg.h>
 
-int	ar5008_attach(struct athn_softc *);
+int	ar5008_attach(struct athn_softc *, uint8_t[]);
 void	ar5008_write_txpower(struct athn_softc *, int16_t power[]);
 void	ar5008_set_viterbi_mask(struct athn_softc *, int);
 void	ar5008_get_pdadcs(struct athn_softc *, uint8_t, struct athn_pier *,

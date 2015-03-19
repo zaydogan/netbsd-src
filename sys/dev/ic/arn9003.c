@@ -178,7 +178,7 @@ MCLGETI(struct athn_softc *sc __unused, int how,
 }
 
 PUBLIC int
-ar9003_attach(struct athn_softc *sc)
+ar9003_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
 	struct athn_ops *ops = &sc->sc_ops;
 	int error;

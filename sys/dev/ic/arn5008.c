@@ -157,10 +157,9 @@ MCLGETI(struct athn_softc *sc __unused, int how,
 }
 
 PUBLIC int
-ar5008_attach(struct athn_softc *sc)
+ar5008_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
 	struct athn_ops *ops = &sc->sc_ops;
-	struct ieee80211com *ic = &sc->sc_ic;
 	struct ar_base_eep_header *base;
 	uint8_t eep_ver, kc_entries_log;
 	int error;
@@ -233,7 +232,7 @@ ar5008_attach(struct athn_softc *sc)
 	if (base->opCapFlags & AR_OPFLAGS_11N)
 		sc->sc_flags |= ATHN_FLAG_11N;
 
-	IEEE80211_ADDR_COPY(ic->ic_myaddr, base->macAddr);
+	IEEE80211_ADDR_COPY(macaddr, base->macAddr);
 
 	/* Check if we have a hardware radio switch. */
 	if (base->rfSilent & AR_EEP_RFSILENT_ENABLED) {
@@ -854,7 +853,15 @@ ar5008_rx_process(struct athn_softc *sc)
 			wh = mtod(m, struct ieee80211_frame *);
 
 			/* Report Michael MIC failures to net80211. */
-			ieee80211_notify_michael_failure(ic, wh, 0 /* XXX: keyix */);
+			/* XXX recheck MIC to deal w/ chips that lie */
+			/* XXX discard MIC errors on !data frames */
+			ni = ieee80211_find_rxnode(ic,
+			    (const struct ieee80211_frame_min *) wh);
+			if (ni != NULL) {
+				ieee80211_notify_michael_failure(ni->ni_vap,
+				    wh, 0 /* XXX: keyix */);
+				ieee80211_free_node(ni);
+			}
 		}
 		ifp->if_ierrors++;
 		goto skip;
@@ -870,7 +877,6 @@ ar5008_rx_process(struct athn_softc *sc)
 	/* Allocate a new Rx buffer. */
 	m1 = MCLGETI(NULL, M_DONTWAIT, NULL, ATHN_RXBUFSZ);
 	if (__predict_false(m1 == NULL)) {
-		ic->ic_stats.is_rx_nobuf++;
 		ifp->if_ierrors++;
 		goto skip;
 	}
@@ -929,10 +935,13 @@ ar5008_rx_process(struct athn_softc *sc)
 	/* Send the frame to the 802.11 layer. */
 	rssi = MS(ds->ds_status4, AR_RXS4_RSSI_COMBINED);
 	rstamp = ds->ds_status2;
-	ieee80211_input(ic, m, ni, rssi, rstamp);
+	if (ni != NULL) {
+		ieee80211_input(ni, m, rssi, rstamp);
+		/* Node is no longer needed. */
+		ieee80211_free_node(ni);
+	} else
+		ieee80211_input_all(ic, m, rssi, 0);
 
-	/* Node is no longer needed. */
-	ieee80211_free_node(ni);
 
  skip:
 	/* Unlink this descriptor from head. */
@@ -1070,32 +1079,22 @@ ar5008_swba_intr(struct athn_softc *sc)
 	uint8_t ridx, hwrate;
 	int error, totlen;
 
-#if notyet
-	if (ic->ic_tim_mcast_pending &&
-	    IF_IS_EMPTY(&ni->ni_savedq) &&
-	    SIMPLEQ_EMPTY(&sc->sc_txq[ATHN_QID_CAB].head))
-		ic->ic_tim_mcast_pending = 0;
-#endif
-	if (ic->ic_dtim_count == 0)
-		ic->ic_dtim_count = ic->ic_dtim_period - 1;
-	else
-		ic->ic_dtim_count--;
-
 	/* Make sure previous beacon has been sent. */
 	if (athn_tx_pending(sc, ATHN_QID_BEACON)) {
 		DPRINTFN(DBG_INTR, sc, "beacon stuck\n");
+		/* XXX FBSD80211 beacon miss, do bstucktask */
 		return EBUSY;
 	}
 	/* Get new beacon. */
-	m = ieee80211_beacon_alloc(ic, ic->ic_bss, &bo);
+	m = ieee80211_beacon_alloc(ni, &bo);
 	if (__predict_false(m == NULL))
 		return ENOBUFS;
 	/* Assign sequence number. */
 	/* XXX: use non-QoS tid? */
 	wh = mtod(m, struct ieee80211_frame *);
 	*(uint16_t *)&wh->i_seq[0] =
-	    htole16(ic->ic_bss->ni_txseqs[0] << IEEE80211_SEQ_SEQ_SHIFT);
-	ic->ic_bss->ni_txseqs[0]++;
+	    htole16(ni->ni_txseqs[0] << IEEE80211_SEQ_SEQ_SHIFT);
+	ni->ni_txseqs[0]++;
 
 	/* Unmap and free old beacon if any. */
 	if (__predict_true(bf->bf_m != NULL)) {
@@ -1129,7 +1128,7 @@ ar5008_swba_intr(struct athn_softc *sc)
 	ds->ds_ctl2 = SM(AR_TXC2_XMIT_DATA_TRIES0, 1);
 
 	/* Write Tx rate. */
-	ridx = (ic->ic_curmode == IEEE80211_MODE_11A) ?
+	ridx = IEEE80211_IS_CHAN_5GHZ(ic->ic_curchan) ?
 	    ATHN_RIDX_OFDM6 : ATHN_RIDX_CCK1;
 	hwrate = athn_rates[ridx].hwrate;
 	ds->ds_ctl3 = SM(AR_TXC3_XMIT_RATE0, hwrate);

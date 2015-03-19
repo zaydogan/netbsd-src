@@ -99,7 +99,7 @@ Static void	ar9380_init_swreg(struct athn_softc *);
 #endif /* notused */
 
 PUBLIC int
-ar9380_attach(struct athn_softc *sc)
+ar9380_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
 
 	sc->sc_ngpiopins = 17;

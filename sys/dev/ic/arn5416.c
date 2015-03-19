@@ -92,7 +92,7 @@ Static void	ar9160_rw_addac(struct athn_softc *,
 		    struct ieee80211_channel *, uint32_t *);
 
 PUBLIC int
-ar5416_attach(struct athn_softc *sc)
+ar5416_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
 	sc->sc_eep_base = AR5416_EEP_START_LOC;
 	sc->sc_eep_size = sizeof(struct ar5416_eeprom);

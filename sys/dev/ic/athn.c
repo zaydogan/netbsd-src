@@ -145,6 +145,7 @@ athn_attach(struct athn_softc *sc)
 	struct ifnet *ifp = &sc->sc_if;
 	size_t max_nnodes;
 	int error;
+	uint8_t macaddr[IEEE80211_ADDR_LEN];
 
 	/* Read hardware revision. */
 	athn_get_chipid(sc);
@@ -160,19 +161,19 @@ athn_attach(struct athn_softc *sc)
 	}
 
 	if (AR_SREV_5416(sc) || AR_SREV_9160(sc))
-		error = ar5416_attach(sc);
+		error = ar5416_attach(sc, macaddr);
 	else if (AR_SREV_9280(sc))
-		error = ar9280_attach(sc);
+		error = ar9280_attach(sc, macaddr);
 	else if (AR_SREV_9285(sc))
-		error = ar9285_attach(sc);
+		error = ar9285_attach(sc, macaddr);
 #if NATHN_USB > 0
 	else if (AR_SREV_9271(sc))
-		error = ar9285_attach(sc);
+		error = ar9285_attach(sc, macaddr);
 #endif
 	else if (AR_SREV_9287(sc))
-		error = ar9287_attach(sc);
+		error = ar9287_attach(sc, macaddr);
 	else if (AR_SREV_9380(sc) || AR_SREV_9485(sc))
-		error = ar9380_attach(sc);
+		error = ar9380_attach(sc, macaddr);
 	else
 		error = ENOTSUP;
 	if (error != 0) {

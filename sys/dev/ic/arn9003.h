@@ -28,7 +28,7 @@
 #ifndef _IF_ARN9003_H_
 #define _IF_ARN9003_H_
 
-int	ar9003_attach(struct athn_softc *);
+int	ar9003_attach(struct athn_softc *, uint8_t []);
 int	ar9003_init_calib(struct athn_softc *);
 void	ar9003_reset_txsring(struct athn_softc *);
 void	ar9003_get_lg_tpow(struct athn_softc *, struct ieee80211_channel *,

@@ -63,8 +63,15 @@ extern int athn_debug;
 #define ATHN_RXBUFSZ	3872
 #define ATHN_TXBUFSZ	4096
 
+#ifndef IEEE80211_NO_HT
+#define ATHN_NRXBUFS	512
+#define ATHN_NTXBUFS	512
+#else
 #define ATHN_NRXBUFS	64
 #define ATHN_NTXBUFS	64	/* Shared between all Tx queues. */
+#endif
+
+#define	ATH_NBCNBUF	4	/* number of beacon buffers */
 
 struct athn_rx_radiotap_header {
 	struct ieee80211_radiotap_header wr_ihdr;
@@ -450,6 +457,25 @@ struct athn_ops {
 	void	(*set_spur_immunity_level)(struct athn_softc *, int);
 };
 
+struct ath_vap {
+	struct ieee80211vap	av_vap;		/* base class */
+	int			av_bslot;	/* beacon slot index */
+	struct athn_tx_buf	*av_bcnbuf;	/* beacon buffer */
+	struct ieee80211_beacon_offsets av_boff;/* dynamic update state */
+	struct ath_txq		av_mcastq;	/* buffered mcast s/w queue */
+
+	void		(*av_recv_mgmt)(struct ieee80211_node *,
+				struct mbuf *, int, int, int);
+	int		(*av_newstate)(struct ieee80211vap *,
+				enum ieee80211_state, int);
+	void		(*av_bmiss)(struct ieee80211vap *);
+	void		(*av_node_ps)(struct ieee80211_node *, int);
+	int		(*av_set_tim)(struct ieee80211_node *, int);
+	void		(*av_recv_pspoll)(struct ieee80211_node *,
+				struct mbuf *);
+};
+#define	ATH_VAP(vap)	((struct ath_vap *)(vap))
+
 struct athn_softc {
 	device_t			sc_dev;
 	device_suspensor_t		sc_suspensor;
@@ -555,6 +581,7 @@ struct athn_softc {
 	bus_dma_segment_t		sc_seg;
 	SIMPLEQ_HEAD(, athn_tx_buf)	sc_txbufs;
 	struct athn_tx_buf		*sc_bcnbuf;
+	struct ieee80211vap		*sc_bcnslot[ATH_NBCNBUF];
 	struct athn_tx_buf		sc_txpool[ATHN_NTXBUFS];
 
 	bus_dmamap_t			sc_txsmap;

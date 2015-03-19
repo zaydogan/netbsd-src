@@ -28,7 +28,7 @@
 #ifndef _IF_ARN9280_H_
 #define _IF_ARN9280_H_
 
-int	ar9280_attach(struct athn_softc *);
+int	ar9280_attach(struct athn_softc *, uint8_t []);
 void	ar9280_reset_rx_gain(struct athn_softc *, struct ieee80211_channel *);
 void	ar9280_reset_tx_gain(struct athn_softc *, struct ieee80211_channel *);
 void	ar9280_olpc_get_pdadcs(struct athn_softc *, struct ieee80211_channel *,

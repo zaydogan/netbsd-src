@@ -78,7 +78,7 @@ Static void	ar9280_olpc_temp_compensation(struct athn_softc *);
 Static void	ar9280_setup(struct athn_softc *);
 
 PUBLIC int
-ar9280_attach(struct athn_softc *sc)
+ar9280_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
 
 	sc->sc_eep_base = AR5416_EEP_START_LOC;

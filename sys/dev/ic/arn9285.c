@@ -94,7 +94,7 @@ Static void	ar9285_setup(struct athn_softc *);
 Static void	ar9285_swap_rom(struct athn_softc *);
 
 PUBLIC int
-ar9285_attach(struct athn_softc *sc)
+ar9285_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
 
 	sc->sc_eep_base = AR9285_EEP_START_LOC;

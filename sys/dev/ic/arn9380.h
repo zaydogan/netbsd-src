@@ -28,6 +28,6 @@
 #ifndef _IF_ARN9380_H_
 #define _IF_ARN9380_H_
 
-int	ar9380_attach(struct athn_softc *);
+int	ar9380_attach(struct athn_softc *, uint8_t []);
 
 #endif /* _IF_ARN9380_H_ */
