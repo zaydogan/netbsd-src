@@ -1293,10 +1293,64 @@ ar5008_intr(struct athn_softc *sc)
 	return 1;
 }
 
+#define	ATH_NONQOS_TID_AC	WME_AC_VO
+
+/*
+ * Determine what the correct AC queue for the given frame
+ * should be.
+ *
+ * This code assumes that the TIDs map consistently to
+ * the underlying hardware (or software) ath_txq.
+ * Since the sender may try to set an AC which is
+ * arbitrary, non-QoS TIDs may end up being put on
+ * completely different ACs. There's no way to put a
+ * TID into multiple ath_txq's for scheduling, so
+ * for now we override the AC/TXQ selection and set
+ * non-QOS TID frames into the BE queue.
+ *
+ * This may be completely incorrect - specifically,
+ * some management frames may end up out of order
+ * compared to the QoS traffic they're controlling.
+ * I'll look into this later.
+ */
+Static int
+athn_tx_getac(struct athn_softc *sc, const struct mbuf *m)
+{
+	const struct ieee80211_frame *wh;
+	int pri = M_WME_GETAC(m);
+	wh = mtod(m, const struct ieee80211_frame *);
+	if (IEEE80211_QOS_HAS_SEQ(wh))
+		return pri;
+
+	return ATH_NONQOS_TID_AC;
+}
+
+#if 0
+/*
+ * Obtain the current TID from the given frame.
+ *
+ * Non-QoS frames need to go into TID 16 (IEEE80211_NONQOS_TID.)
+ * This has implications for which AC/priority the packet is placed
+ * in.
+ */
+Static int
+athn_tx_gettid(struct athn_softc *sc, const struct mbuf *m)
+{
+	const struct ieee80211_frame *wh;
+	int pri = M_WME_GETAC(m);
+	wh = mtod(m, const struct ieee80211_frame *);
+	if (IEEE80211_QOS_HAS_SEQ(wh))
+		return WME_AC_TO_TID(pri);
+
+	return IEEE80211_NONQOS_TID;
+}
+#endif
+
 Static int
 ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
     int txflags)
 {
+	struct ieee80211vap *vap = ni->ni_vap;
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_key *k = NULL;
 	struct ieee80211_frame *wh;
@@ -1349,16 +1403,8 @@ ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 
 	/* Select the HW Tx queue to use for this frame. */
 	if ((hasqos = ieee80211_has_qos(wh))) {
-#ifdef notyet_edca
-		uint8_t tid;
-
 		qos = ieee80211_get_qos(wh);
-		tid = qos & IEEE80211_QOS_TID;
-		qid = athn_ac2qid[ieee80211_up_to_ac(ic, tid)];
-#else
-		qos = ieee80211_get_qos(wh);
-		qid = ATHN_QID_AC_BE;
-#endif /* notyet_edca */
+		qid = athn_ac2qid[athn_tx_getac(sc, m)];
 	}
 	else if (type == AR_FRAME_TYPE_PSPOLL) {
 		qos = 0;
@@ -1383,11 +1429,13 @@ ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 		    IEEE80211_IS_CHAN_5GHZ(ic->ic_curchan) ?
 			ATHN_RIDX_OFDM6 : ATHN_RIDX_CCK1;
 	}
+#ifdef notsupport	/* fixed rate is not support yet */
 	else if (ic->ic_fixed_rate != -1) {
 		/* Use same fixed rate for all tries. */
 		ridx[0] = ridx[1] = ridx[2] = ridx[3] =
 		    sc->sc_fixed_ridx;
 	}
+#endif
 	else {
 		int txrate = ni->ni_txrate;
 		/* Use fallback table of the node. */
@@ -1517,7 +1565,7 @@ ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 	/* Check if frame must be protected using RTS/CTS or CTS-to-self. */
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 		/* NB: Group frames are sent using CCK in 802.11b/g. */
-		if (totlen > ic->ic_rtsthreshold) {
+		if (totlen > vap->iv_rtsthreshold) {
 			ds->ds_ctl0 |= AR_TXC0_RTS_ENABLE;
 		}
 		else if ((ic->ic_flags & IEEE80211_F_USEPROT) &&
