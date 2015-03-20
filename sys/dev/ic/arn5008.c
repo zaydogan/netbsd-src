@@ -1062,6 +1062,90 @@ ar5008_tx_intr(struct athn_softc *sc)
 }
 
 #ifndef IEEE80211_STA_ONLY
+Static void
+athn_beacon_setup(struct athn_softc *sc, struct athn_tx_buf *bf)
+{
+	struct ieee80211_node *ni = bf->bf_ni;
+	struct ieee80211com *ic = ni->ni_ic;
+	struct mbuf *m = bf->bf_m;
+	struct ar_tx_desc *ds = bf->bf_descs;
+	int totlen;
+	uint8_t ridx, hwrate;
+
+	memset(ds, 0, sizeof(*ds));
+
+	/* XXX FBSD80211 IBSS && EVAL unimplemented */
+
+	totlen = m->m_pkthdr.len + IEEE80211_CRC_LEN;
+	ds->ds_ctl0 = SM(AR_TXC0_FRAME_LEN, totlen);
+	ds->ds_ctl0 |= SM(AR_TXC0_XMIT_POWER, AR_MAX_RATE_POWER);
+	ds->ds_ctl1 = SM(AR_TXC1_FRAME_TYPE, AR_FRAME_TYPE_BEACON);
+	ds->ds_ctl1 |= AR_TXC1_NO_ACK;
+	ds->ds_ctl6 = SM(AR_TXC6_ENCR_TYPE, AR_ENCR_TYPE_CLEAR);
+	/* XXX unimplemented antenna */
+	/* XXX ar5210: (antMode ? AR_AntModeXmit(=0x02000000) : 0) */
+	/* XXX ar5211: (antMode << AR_AntModeXmit_S(=25)) */
+	/* XXX ar5212: SM(antMode, AR_AntModeXmit) */
+
+	/* Write number of tries. */
+	ds->ds_ctl2 = SM(AR_TXC2_XMIT_DATA_TRIES0, 1);
+
+	/* Write Tx rate. */
+	ridx = IEEE80211_IS_CHAN_5GHZ(ic->ic_curchan) ?
+	    ATHN_RIDX_OFDM6 : ATHN_RIDX_CCK1;
+	hwrate = athn_rates[ridx].hwrate;	/* XXX athn_rates */
+	ds->ds_ctl3 = SM(AR_TXC3_XMIT_RATE0, hwrate);
+
+	/* Write Tx chains. */
+	ds->ds_ctl7 = SM(AR_TXC7_CHAIN_SEL0, sc->sc_txchainmask);
+
+	ds->ds_data = bf->bf_map->dm_segs[0].ds_addr;
+	/* Segment length must be a multiple of 4. */
+	ds->ds_ctl1 |= SM(AR_TXC1_BUF_LEN,
+	    (bf->bf_map->dm_segs[0].ds_len + 3) & ~3);
+}
+
+struct athn_tx_buf *
+athn_beacon_generate(struct athn_softc *sc, struct ieee80211vap *vap);
+
+struct athn_tx_buf *
+athn_beacon_generate(struct athn_softc *sc, struct ieee80211vap *vap)
+{
+	struct ath_vap *avp = ATH_VAP(vap);
+	struct athn_tx_buf *bf = &avp->av_bcnbuf;	/* XXX FBSD80211 bcnbuf is pointer? */
+	struct mbuf *m = bf->bf_m;
+	int nmcastq, error;
+
+	KASSERTMSG(vap->iv_state >= IEEE80211_S_RUN,
+	    "not running, state %d", vap->iv_state);
+	KASSERTMSG(bf != NULL, "no beacon buffer");
+
+	/*
+	 * Update dynamic beacon contents.  If this returns
+	 * non-zero then we need to remap the memory because
+	 * the beacon frame changed size (probably because
+	 * of the TIM bitmap).
+	 */
+	nmcastq = avp->av_mcastq.queued;	/* XXX FBSD80211 ??? */
+	if (ieee80211_beacon_update(bf->bf_ni, &avp->av_boff, m, nmcastq)) {
+		bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0,
+		    bf->bf_map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
+		bus_dmamap_unload(sc->sc_dmat, bf->bf_map);
+		error = bus_dmamap_load_mbuf(sc->sc_dmat, bf->bf_map, m,
+		    BUS_DMA_NOWAIT | BUS_DMA_WRITE);
+		if (error != 0) {
+			aprint_error_dev(sc->sc_dev,
+			    "%s: bus_dmamap_load_mbuf failed, error %d",
+			    __func__, error);
+			return NULL;
+		}
+	}
+	/* XXX FBSD80211 what is cabq? */
+	athn_beacon_setup(sc, bf);
+	bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0, bf->bf_map->dm_mapsize,
+	    BUS_DMASYNC_PREWRITE);
+}
+
 /*
  * Process Software Beacon Alert interrupts.
  */
@@ -1070,7 +1154,7 @@ ar5008_swba_intr(struct athn_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &sc->sc_if;
-	struct ieee80211_node *ni = ic->ic_bss;
+	struct ieee80211_node *ni;
 	struct athn_tx_buf *bf = sc->sc_bcnbuf;
 	struct ieee80211_frame *wh;
 	struct ieee80211_beacon_offsets bo;
@@ -1085,6 +1169,22 @@ ar5008_swba_intr(struct athn_softc *sc)
 		/* XXX FBSD80211 beacon miss, do bstucktask */
 		return EBUSY;
 	}
+
+	uint32_t bfaddr;
+	uint32_t *bflink = &bfaddr;
+	for (int slot = 0; slot < ATH_NBCNBUF; slot++) {
+		struct ieee80211vap *vap = sc->sc_bcnslot[slot];
+		if (vap != NULL && vap->iv_state >= IEEE80211_S_RUN) {
+			bf = athn_beacon_generate(sc, vap);
+			if (bf != NULL) {
+				*bflink = bf->bf_daddr;
+				bflink = (uint32_t *)bf->bf_daddr;
+			}
+		}
+	}
+	*bflink = 0;
+
+
 	/* Get new beacon. */
 	m = ieee80211_beacon_alloc(ni, &bo);
 	if (__predict_false(m == NULL))
@@ -1310,7 +1410,7 @@ ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 		type = AR_FRAME_TYPE_NORMAL;
 
 	if (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
-		k = ieee80211_crypto_encap(ic, ni, m);
+		k = ieee80211_crypto_encap(ni, m);
 		if (k == NULL)
 			return ENOBUFS;
 
@@ -1353,7 +1453,7 @@ ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 	    IEEE80211_FC0_TYPE_DATA) {
 		/* Use lowest rate for all tries. */
 		ridx[0] = ridx[1] = ridx[2] = ridx[3] =
-		    (ic->ic_curmode == IEEE80211_MODE_11A) ?
+		    IEEE80211_IS_CHAN_5GHZ(ic->ic_curchan) ?
 			ATHN_RIDX_OFDM6 : ATHN_RIDX_CCK1;
 	}
 	else if (ic->ic_fixed_rate != -1) {

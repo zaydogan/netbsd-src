@@ -460,9 +460,9 @@ struct athn_ops {
 struct ath_vap {
 	struct ieee80211vap	av_vap;		/* base class */
 	int			av_bslot;	/* beacon slot index */
-	struct athn_tx_buf	*av_bcnbuf;	/* beacon buffer */
+	struct athn_tx_buf	av_bcnbuf;	/* beacon buffer */	/* XXX FBSD80211 pointer? */
 	struct ieee80211_beacon_offsets av_boff;/* dynamic update state */
-	struct ath_txq		av_mcastq;	/* buffered mcast s/w queue */
+	struct athn_txq		av_mcastq;	/* buffered mcast s/w queue */
 
 	void		(*av_recv_mgmt)(struct ieee80211_node *,
 				struct mbuf *, int, int, int);
@@ -580,7 +580,7 @@ struct athn_softc {
 	bus_dmamap_t			sc_map;
 	bus_dma_segment_t		sc_seg;
 	SIMPLEQ_HEAD(, athn_tx_buf)	sc_txbufs;
-	struct athn_tx_buf		*sc_bcnbuf;
+	struct athn_tx_buf		*sc_bcnbuf;	/* XXX FBSD80211 unused? */
 	struct ieee80211vap		*sc_bcnslot[ATH_NBCNBUF];
 	struct athn_tx_buf		sc_txpool[ATHN_NTXBUFS];
 
