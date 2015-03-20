@@ -460,7 +460,7 @@ struct athn_ops {
 struct ath_vap {
 	struct ieee80211vap	av_vap;		/* base class */
 	int			av_bslot;	/* beacon slot index */
-	struct athn_tx_buf	av_bcnbuf;	/* beacon buffer */	/* XXX FBSD80211 pointer? */
+	struct athn_tx_buf	*av_bcnbuf;	/* beacon buffer */
 	struct ieee80211_beacon_offsets av_boff;/* dynamic update state */
 	struct athn_txq		av_mcastq;	/* buffered mcast s/w queue */
 

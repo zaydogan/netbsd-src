@@ -1112,7 +1112,7 @@ struct athn_tx_buf *
 athn_beacon_generate(struct athn_softc *sc, struct ieee80211vap *vap)
 {
 	struct ath_vap *avp = ATH_VAP(vap);
-	struct athn_tx_buf *bf = &avp->av_bcnbuf;	/* XXX FBSD80211 bcnbuf is pointer? */
+	struct athn_tx_buf *bf = avp->av_bcnbuf;
 	struct mbuf *m = bf->bf_m;
 	int nmcastq, error;
 
@@ -1140,10 +1140,14 @@ athn_beacon_generate(struct athn_softc *sc, struct ieee80211vap *vap)
 			return NULL;
 		}
 	}
+
 	/* XXX FBSD80211 what is cabq? */
+
 	athn_beacon_setup(sc, bf);
 	bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0, bf->bf_map->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
+
+	return bf;
 }
 
 /*
@@ -1152,16 +1156,7 @@ athn_beacon_generate(struct athn_softc *sc, struct ieee80211vap *vap)
 Static int
 ar5008_swba_intr(struct athn_softc *sc)
 {
-	struct ieee80211com *ic = &sc->sc_ic;
-	struct ifnet *ifp = &sc->sc_if;
-	struct ieee80211_node *ni;
-	struct athn_tx_buf *bf = sc->sc_bcnbuf;
-	struct ieee80211_frame *wh;
-	struct ieee80211_beacon_offsets bo;
-	struct ar_tx_desc *ds;
-	struct mbuf *m;
-	uint8_t ridx, hwrate;
-	int error, totlen;
+	struct athn_tx_buf *bf = NULL;
 
 	/* Make sure previous beacon has been sent. */
 	if (athn_tx_pending(sc, ATHN_QID_BEACON)) {
@@ -1170,6 +1165,7 @@ ar5008_swba_intr(struct athn_softc *sc)
 		return EBUSY;
 	}
 
+	/* XXX FBSD80211 staggered beacons? */
 	uint32_t bfaddr;
 	uint32_t *bflink = &bfaddr;
 	for (int slot = 0; slot < ATH_NBCNBUF; slot++) {
@@ -1178,96 +1174,27 @@ ar5008_swba_intr(struct athn_softc *sc)
 			bf = athn_beacon_generate(sc, vap);
 			if (bf != NULL) {
 				*bflink = bf->bf_daddr;
+				bus_dmamap_sync(sc->sc_dmat, bf->bf_map,
+				    offsetof(struct athn_tx_buf, bf_daddr),
+				    sizeof(uint32_t), BUS_DMASYNC_PREWRITE);
 				bflink = (uint32_t *)bf->bf_daddr;
 			}
 		}
 	}
+	/* XXX only no vap case? */
+	if (bf == NULL)
+		return 0;
+
+	/* terminate list */
 	*bflink = 0;
-
-
-	/* Get new beacon. */
-	m = ieee80211_beacon_alloc(ni, &bo);
-	if (__predict_false(m == NULL))
-		return ENOBUFS;
-	/* Assign sequence number. */
-	/* XXX: use non-QoS tid? */
-	wh = mtod(m, struct ieee80211_frame *);
-	*(uint16_t *)&wh->i_seq[0] =
-	    htole16(ni->ni_txseqs[0] << IEEE80211_SEQ_SEQ_SHIFT);
-	ni->ni_txseqs[0]++;
-
-	/* Unmap and free old beacon if any. */
-	if (__predict_true(bf->bf_m != NULL)) {
-		bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0,
-		    bf->bf_map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
-		bus_dmamap_unload(sc->sc_dmat, bf->bf_map);
-		m_freem(bf->bf_m);
-		bf->bf_m = NULL;
-	}
-	/* DMA map new beacon. */
-	error = bus_dmamap_load_mbuf(sc->sc_dmat, bf->bf_map, m,
-	    BUS_DMA_NOWAIT | BUS_DMA_WRITE);
-	if (__predict_false(error != 0)) {
-		m_freem(m);
-		return error;
-	}
-	bf->bf_m = m;
-
-	/* Setup Tx descriptor (simplified ar5008_tx()). */
-	ds = bf->bf_descs;
-	memset(ds, 0, sizeof(*ds));
-
-	totlen = m->m_pkthdr.len + IEEE80211_CRC_LEN;
-	ds->ds_ctl0 = SM(AR_TXC0_FRAME_LEN, totlen);
-	ds->ds_ctl0 |= SM(AR_TXC0_XMIT_POWER, AR_MAX_RATE_POWER);
-	ds->ds_ctl1 = SM(AR_TXC1_FRAME_TYPE, AR_FRAME_TYPE_BEACON);
-	ds->ds_ctl1 |= AR_TXC1_NO_ACK;
-	ds->ds_ctl6 = SM(AR_TXC6_ENCR_TYPE, AR_ENCR_TYPE_CLEAR);
-
-	/* Write number of tries. */
-	ds->ds_ctl2 = SM(AR_TXC2_XMIT_DATA_TRIES0, 1);
-
-	/* Write Tx rate. */
-	ridx = IEEE80211_IS_CHAN_5GHZ(ic->ic_curchan) ?
-	    ATHN_RIDX_OFDM6 : ATHN_RIDX_CCK1;
-	hwrate = athn_rates[ridx].hwrate;
-	ds->ds_ctl3 = SM(AR_TXC3_XMIT_RATE0, hwrate);
-
-	/* Write Tx chains. */
-	ds->ds_ctl7 = SM(AR_TXC7_CHAIN_SEL0, sc->sc_txchainmask);
-
-	ds->ds_data = bf->bf_map->dm_segs[0].ds_addr;
-	/* Segment length must be a multiple of 4. */
-	ds->ds_ctl1 |= SM(AR_TXC1_BUF_LEN,
-	    (bf->bf_map->dm_segs[0].ds_len + 3) & ~3);
-
-	bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0, bf->bf_map->dm_mapsize,
+	bus_dmamap_sync(sc->sc_dmat, bf->bf_map,
+	    offsetof(struct athn_tx_buf, bf_daddr), sizeof(uint32_t),
 	    BUS_DMASYNC_PREWRITE);
 
 	/* Stop Tx DMA before putting the new beacon on the queue. */
 	athn_stop_tx_dma(sc, ATHN_QID_BEACON);
 
 	AR_WRITE(sc, AR_QTXDP(ATHN_QID_BEACON), bf->bf_daddr);
-
-	for(;;) {
-		if (SIMPLEQ_EMPTY(&sc->sc_txbufs))
-			break;
-
-		IF_DEQUEUE(&ni->ni_savedq, m);
-		if (m == NULL)
-			break;
-		if (!IF_IS_EMPTY(&ni->ni_savedq)) {
-			/* more queued frames, set the more data bit */
-			wh = mtod(m, struct ieee80211_frame *);
-			wh->i_fc[1] |= IEEE80211_FC1_MORE_DATA;
-		}
-
-		if (sc->sc_ops.tx(sc, m, ni, ATHN_TXFLAG_CAB) != 0) {
-			ieee80211_free_node(ni);
-			ifp->if_oerrors++;
-			break;
-		}
-	}
 
 	/* Kick Tx. */
 	AR_WRITE(sc, AR_Q_TXE, 1 << ATHN_QID_BEACON);
