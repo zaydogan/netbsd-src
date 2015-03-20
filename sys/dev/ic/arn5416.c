@@ -113,7 +113,7 @@ ar5416_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 		sc->sc_ini = &ar5416_ini;
 	sc->sc_serdes = &ar5416_serdes;
 
-	return ar5008_attach(sc);
+	return ar5008_attach(sc, macaddr);
 }
 
 Static void
