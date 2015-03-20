@@ -219,6 +219,26 @@ ieee80211_has_qos(const struct ieee80211_frame *wh)
 	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS);
 }
 
+static __inline int
+ieee80211_has_addr4(const struct ieee80211_frame *wh)
+{
+	return (wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) ==
+	    IEEE80211_FC1_DIR_DSTODS;
+}
+
+static __inline uint16_t
+ieee80211_get_qos(const struct ieee80211_frame *wh)
+{
+	const uint8_t *frm;
+
+	if (ieee80211_has_addr4(wh))
+		frm = ((const struct ieee80211_qosframe_addr4 *)wh)->i_qos;
+	else
+		frm = ((const struct ieee80211_qosframe *)wh)->i_qos;
+
+	return le16toh(*(const uint16_t *)frm);
+}
+
 /* does frame have QoS sequence control data */
 #define	IEEE80211_QOS_HAS_SEQ(wh)	ieee80211_has_qos(wh)
 
