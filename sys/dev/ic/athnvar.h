@@ -457,7 +457,7 @@ struct athn_ops {
 	void	(*set_spur_immunity_level)(struct athn_softc *, int);
 };
 
-struct ath_vap {
+struct athn_vap {
 	struct ieee80211vap	av_vap;		/* base class */
 	int			av_bslot;	/* beacon slot index */
 	struct athn_tx_buf	*av_bcnbuf;	/* beacon buffer */
@@ -474,7 +474,7 @@ struct ath_vap {
 	void		(*av_recv_pspoll)(struct ieee80211_node *,
 				struct mbuf *);
 };
-#define	ATH_VAP(vap)	((struct ath_vap *)(vap))
+#define	ATHN_VAP(vap)	((struct athn_vap *)(vap))
 
 struct athn_softc {
 	device_t			sc_dev;

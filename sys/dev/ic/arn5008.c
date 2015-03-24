@@ -1108,7 +1108,7 @@ athn_beacon_setup(struct athn_softc *sc, struct athn_tx_buf *bf)
 Static struct athn_tx_buf *
 athn_beacon_generate(struct athn_softc *sc, struct ieee80211vap *vap)
 {
-	struct ath_vap *avp = ATH_VAP(vap);
+	struct athn_vap *avp = ATHN_VAP(vap);
 	struct athn_tx_buf *bf = avp->av_bcnbuf;
 	struct mbuf *m = bf->bf_m;
 	int nmcastq, error;
