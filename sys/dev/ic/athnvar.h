@@ -394,7 +394,7 @@ struct athn_ops {
 	void		(*write)(struct athn_softc *, uint32_t, uint32_t);
 	void		(*write_barrier)(struct athn_softc *);
 
-	void	(*setup)(struct athn_softc *);
+	void	(*setup)(struct athn_softc *, uint8_t [IEEE80211_ADDR_LEN]);
 	void	(*set_txpower)(struct athn_softc *, struct ieee80211_channel *,
 		    struct ieee80211_channel *);
 	void	(*spur_mitigate)(struct athn_softc *,

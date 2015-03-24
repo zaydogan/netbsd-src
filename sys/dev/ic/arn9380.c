@@ -81,7 +81,7 @@ Static int	ar9380_set_synth(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
 Static void	ar9380_set_txpower(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
-Static void	ar9380_setup(struct athn_softc *);
+Static void	ar9380_setup(struct athn_softc *, uint8_t macaddr[]);
 Static void	ar9380_spur_mitigate(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
 Static void	ar9380_spur_mitigate_cck(struct athn_softc *,
@@ -124,13 +124,12 @@ ar9380_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 		sc->sc_serdes = &ar9380_2_2_serdes;
 	}
 
-	return ar9003_attach(sc);
+	return ar9003_attach(sc, macaddr);
 }
 
 Static void
-ar9380_setup(struct athn_softc *sc)
+ar9380_setup(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
-	struct ieee80211com *ic = &sc->sc_ic;
 	struct ar9380_eeprom *eep = sc->sc_eep;
 	struct ar9380_base_eep_hdr *base = &eep->baseEepHeader;
 	uint8_t type;
@@ -142,7 +141,7 @@ ar9380_setup(struct athn_softc *sc)
 	if (base->opFlags & AR_OPFLAGS_11N)
 		sc->sc_flags |= ATHN_FLAG_11N;
 
-	IEEE80211_ADDR_COPY(ic->ic_myaddr, eep->macAddr);
+	IEEE80211_ADDR_COPY(macaddr, eep->macAddr);
 	sc->sc_led_pin = base->wlanLedGpio;
 
 	/* Check if we have a hardware radio switch. */

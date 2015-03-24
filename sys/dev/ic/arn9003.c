@@ -241,7 +241,7 @@ ar9003_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 	if (AR_READ(sc, AR_ENT_OTP) & AR_ENT_OTP_MPSD)
 		sc->sc_flags |= ATHN_FLAG_NON_ENTERPRISE;
 
-	ops->setup(sc);
+	ops->setup(sc, macaddr);
 	return 0;
 }
 
@@ -987,8 +987,15 @@ ar9003_rx_process(struct athn_softc *sc, int qid)
 			m->m_pkthdr.len = m->m_len = len;
 			wh = mtod(m, struct ieee80211_frame *);
 
-			ieee80211_notify_michael_failure(ic, wh,
-			    0 /* XXX: keyix */);
+			/* XXX recheck MIC to deal w/ chips that lie */
+			/* XXX discard MIC errors on !data frames */
+			ni = ieee80211_find_rxnode(ic,
+			    (const struct ieee80211_frame_min *) wh);
+			if (ni != NULL) {
+				ieee80211_notify_michael_failure(ni->ni_vap,
+				    wh, 0 /* XXX: keyix */);
+				ieee80211_free_node(ni);
+			}
 		}
 		ifp->if_ierrors++;
 		goto skip;
@@ -1006,7 +1013,6 @@ ar9003_rx_process(struct athn_softc *sc, int qid)
 	/* Allocate a new Rx buffer. */
 	m1 = MCLGETI(NULL, M_DONTWAIT, NULL, ATHN_RXBUFSZ);
 	if (__predict_false(m1 == NULL)) {
-		ic->ic_stats.is_rx_nobuf++;
 		ifp->if_ierrors++;
 		goto skip;
 	}
@@ -1061,10 +1067,13 @@ ar9003_rx_process(struct athn_softc *sc, int qid)
 	/* Send the frame to the 802.11 layer. */
 	rssi = MS(ds->ds_status5, AR_RXS5_RSSI_COMBINED);
 	rstamp = ds->ds_status3;
-	ieee80211_input(ic, m, ni, rssi, rstamp);
+	if (ni != NULL) {
+		ieee80211_input(ni, m, rssi, rstamp);
 
-	/* Node is no longer needed. */
-	ieee80211_free_node(ni);
+		/* Node is no longer needed. */
+		ieee80211_free_node(ni);
+	} else
+		ieee80211_input_all(ic, m, rssi, 0);
 
  skip:
 	/* Unlink this descriptor from head. */
@@ -1199,71 +1208,20 @@ ar9003_tx_intr(struct athn_softc *sc)
 }
 
 #ifndef IEEE80211_STA_ONLY
-/*
- * Process Software Beacon Alert interrupts.
- */
-Static int
-ar9003_swba_intr(struct athn_softc *sc)
+Static void
+athn_beacon_setup(struct athn_softc *sc, struct athn_tx_buf *bf)
 {
-	struct ieee80211com *ic = &sc->sc_ic;
-	struct ifnet *ifp = &sc->sc_if;
-	struct ieee80211_node *ni = ic->ic_bss;
-	struct athn_tx_buf *bf = sc->sc_bcnbuf;
-	struct ieee80211_frame *wh;
-	struct ieee80211_beacon_offsets bo;
-	struct ar_tx_desc *ds;
-	struct mbuf *m;
+	struct ieee80211_node *ni = bf->bf_ni;
+	struct ieee80211com *ic = ni->ni_ic;
+	struct mbuf *m = bf->bf_m;
+	struct ar_tx_desc *ds = bf->bf_descs;
 	uint32_t sum;
+	int totlen;
 	uint8_t ridx, hwrate;
-	int error, totlen;
 
-#if notyet
-	if (ic->ic_tim_mcast_pending &&
-	    IF_IS_EMPTY(&ni->ni_savedq) &&
-	    SIMPLEQ_EMPTY(&sc->sc_txq[ATHN_QID_CAB].head))
-		ic->ic_tim_mcast_pending = 0;
-#endif
-	if (ic->ic_dtim_count == 0)
-		ic->ic_dtim_count = ic->ic_dtim_period - 1;
-	else
-		ic->ic_dtim_count--;
-
-	/* Make sure previous beacon has been sent. */
-	if (athn_tx_pending(sc, ATHN_QID_BEACON)) {
-		DPRINTFN(DBG_INTR, sc, "beacon stuck\n");
-		return EBUSY;
-	}
-	/* Get new beacon. */
-	m = ieee80211_beacon_alloc(ic, ic->ic_bss, &bo);
-	if (__predict_false(m == NULL))
-		return ENOBUFS;
-	/* Assign sequence number. */
-	/* XXX: use non-QoS tid? */
-	wh = mtod(m, struct ieee80211_frame *);
-	*(uint16_t *)&wh->i_seq[0] =
-	    htole16(ic->ic_bss->ni_txseqs[0] << IEEE80211_SEQ_SEQ_SHIFT);
-	ic->ic_bss->ni_txseqs[0]++;
-
-	/* Unmap and free old beacon if any. */
-	if (__predict_true(bf->bf_m != NULL)) {
-		bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0,
-		    bf->bf_map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
-		bus_dmamap_unload(sc->sc_dmat, bf->bf_map);
-		m_freem(bf->bf_m);
-		bf->bf_m = NULL;
-	}
-	/* DMA map new beacon. */
-	error = bus_dmamap_load_mbuf(sc->sc_dmat, bf->bf_map, m,
-	    BUS_DMA_NOWAIT | BUS_DMA_WRITE);
-	if (__predict_false(error != 0)) {
-		m_freem(m);
-		return error;
-	}
-	bf->bf_m = m;
-
-	/* Setup Tx descriptor (simplified ar9003_tx()). */
-	ds = bf->bf_descs;
 	memset(ds, 0, sizeof(*ds));
+
+	/* XXX FBSD80211 IBSS && EVAL unimplemented */
 
 	ds->ds_info =
 	    SM(AR_TXI_DESC_ID, AR_VENDOR_ATHEROS) |
@@ -1278,11 +1236,13 @@ ar9003_swba_intr(struct athn_softc *sc)
 	ds->ds_ctl12 |= AR_TXC12_NO_ACK;
 	ds->ds_ctl17 = SM(AR_TXC17_ENCR_TYPE, AR_ENCR_TYPE_CLEAR);
 
+	/* XXX unimplemented antenna */
+
 	/* Write number of tries. */
 	ds->ds_ctl13 = SM(AR_TXC13_XMIT_DATA_TRIES0, 1);
 
 	/* Write Tx rate. */
-	ridx = (ic->ic_curmode == IEEE80211_MODE_11A) ?
+	ridx = IEEE80211_IS_CHAN_5GHZ(ic->ic_curchan) ?
 	    ATHN_RIDX_OFDM6 : ATHN_RIDX_CCK1;
 	hwrate = athn_rates[ridx].hwrate;
 	ds->ds_ctl14 = SM(AR_TXC14_XMIT_RATE0, hwrate);
@@ -1300,34 +1260,94 @@ ar9003_swba_intr(struct athn_softc *sc)
 	sum += ds->ds_segs[0].ds_ctl;
 	sum = (sum >> 16) + (sum & 0xffff);
 	ds->ds_ctl10 = SM(AR_TXC10_PTR_CHK_SUM, sum);
+}
 
+Static struct athn_tx_buf *
+athn_beacon_generate(struct athn_softc *sc, struct ieee80211vap *vap)
+{
+	struct ath_vap *avp = ATH_VAP(vap);
+	struct athn_tx_buf *bf = avp->av_bcnbuf;
+	struct mbuf *m = bf->bf_m;
+	int nmcastq, error;
+
+	KASSERTMSG(vap->iv_state >= IEEE80211_S_RUN,
+	    "not running, state %d", vap->iv_state);
+	KASSERTMSG(bf != NULL, "no beacon buffer");
+
+	/*
+	 * Update dynamic beacon contents.  If this returns
+	 * non-zero then we need to remap the memory because
+	 * the beacon frame changed size (probably because
+	 * of the TIM bitmap).
+	 */
+	nmcastq = avp->av_mcastq.queued;	/* XXX FBSD80211 ??? */
+	if (ieee80211_beacon_update(bf->bf_ni, &avp->av_boff, m, nmcastq)) {
+		bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0,
+		    bf->bf_map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
+		bus_dmamap_unload(sc->sc_dmat, bf->bf_map);
+		error = bus_dmamap_load_mbuf(sc->sc_dmat, bf->bf_map, m,
+		    BUS_DMA_NOWAIT | BUS_DMA_WRITE);
+		if (error != 0) {
+			aprint_error_dev(sc->sc_dev,
+			    "%s: bus_dmamap_load_mbuf failed, error %d",
+			    __func__, error);
+			return NULL;
+		}
+	}
+
+	/* XXX FBSD80211 what is cabq? */
+
+	athn_beacon_setup(sc, bf);	/* XXX FBSD80211 function pointer'ed? */
 	bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0, bf->bf_map->dm_mapsize,
+	    BUS_DMASYNC_PREWRITE);
+
+	return bf;
+}
+
+/*
+ * Process Software Beacon Alert interrupts.
+ */
+Static int
+ar9003_swba_intr(struct athn_softc *sc)
+{
+	struct athn_tx_buf *bf = NULL;
+
+	/* Make sure previous beacon has been sent. */
+	if (athn_tx_pending(sc, ATHN_QID_BEACON)) {
+		DPRINTFN(DBG_INTR, sc, "beacon stuck\n");
+		return EBUSY;
+	}
+
+	/* XXX FBSD80211 staggered beacons? */
+	uint32_t bfaddr;
+	uint32_t *bflink = &bfaddr;
+	for (int slot = 0; slot < ATH_NBCNBUF; slot++) {
+		struct ieee80211vap *vap = sc->sc_bcnslot[slot];
+		if (vap != NULL && vap->iv_state >= IEEE80211_S_RUN) {
+			bf = athn_beacon_generate(sc, vap);
+			if (bf != NULL) {
+				*bflink = bf->bf_daddr;
+				bus_dmamap_sync(sc->sc_dmat, bf->bf_map,
+				    offsetof(struct athn_tx_buf, bf_daddr),
+				    sizeof(uint32_t), BUS_DMASYNC_PREWRITE);
+				bflink = (uint32_t *)bf->bf_daddr;
+			}
+		}
+	}
+	/* XXX only no vap case? */
+	if (bf == NULL)
+		return 0;
+
+	/* terminate list */
+	*bflink = 0;
+	bus_dmamap_sync(sc->sc_dmat, bf->bf_map,
+	    offsetof(struct athn_tx_buf, bf_daddr), sizeof(uint32_t),
 	    BUS_DMASYNC_PREWRITE);
 
 	/* Stop Tx DMA before putting the new beacon on the queue. */
 	athn_stop_tx_dma(sc, ATHN_QID_BEACON);
 
 	AR_WRITE(sc, AR_QTXDP(ATHN_QID_BEACON), bf->bf_daddr);
-
-	for(;;) {
-		if (SIMPLEQ_EMPTY(&sc->sc_txbufs))
-			break;
-
-		IF_DEQUEUE(&ni->ni_savedq, m);
-		if (m == NULL)
-			break;
-		if (!IF_IS_EMPTY(&ni->ni_savedq)) {
-			/* more queued frames, set the more data bit */
-			wh = mtod(m, struct ieee80211_frame *);
-			wh->i_fc[1] |= IEEE80211_FC1_MORE_DATA;
-		}
-
-		if (sc->sc_ops.tx(sc, m, ni, ATHN_TXFLAG_CAB) != 0) {
-			ieee80211_free_node(ni);
-			ifp->if_oerrors++;
-			break;
-		}
-	}
 
 	/* Kick Tx. */
 	AR_WRITE(sc, AR_Q_TXE, 1 << ATHN_QID_BEACON);
@@ -1422,10 +1442,43 @@ ar9003_intr(struct athn_softc *sc)
 	return 1;
 }
 
+#define	ATH_NONQOS_TID_AC	WME_AC_VO
+
+/*
+ * Determine what the correct AC queue for the given frame
+ * should be.
+ *
+ * This code assumes that the TIDs map consistently to
+ * the underlying hardware (or software) ath_txq.
+ * Since the sender may try to set an AC which is
+ * arbitrary, non-QoS TIDs may end up being put on
+ * completely different ACs. There's no way to put a
+ * TID into multiple ath_txq's for scheduling, so
+ * for now we override the AC/TXQ selection and set
+ * non-QOS TID frames into the BE queue.
+ *
+ * This may be completely incorrect - specifically,
+ * some management frames may end up out of order
+ * compared to the QoS traffic they're controlling.
+ * I'll look into this later.
+ */
+Static int
+athn_tx_getac(struct athn_softc *sc, const struct mbuf *m)
+{
+	const struct ieee80211_frame *wh;
+	int pri = M_WME_GETAC(m);
+	wh = mtod(m, const struct ieee80211_frame *);
+	if (IEEE80211_QOS_HAS_SEQ(wh))
+		return pri;
+
+	return ATH_NONQOS_TID_AC;
+}
+
 Static int
 ar9003_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
     int txflags)
 {
+	struct ieee80211vap *vap = ni->ni_vap;
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_key *k = NULL;
 	struct ieee80211_frame *wh;
@@ -1467,7 +1520,7 @@ ar9003_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 		type = AR_FRAME_TYPE_NORMAL;
 
 	if (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
-		k = ieee80211_crypto_encap(ic, ni, m);
+		k = ieee80211_crypto_encap(ni, m);
 		if (k == NULL)
 			return ENOBUFS;
 
@@ -1479,16 +1532,8 @@ ar9003_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 
 	/* Select the HW Tx queue to use for this frame. */
 	if ((hasqos = ieee80211_has_qos(wh))) {
-#ifdef notyet_edca
-		uint8_t tid;
-
 		qos = ieee80211_get_qos(wh);
-		tid = qos & IEEE80211_QOS_TID;
-		qid = athn_ac2qid[ieee80211_up_to_ac(ic, tid)];
-#else
-		qos = ieee80211_get_qos(wh);
-		qid = ATHN_QID_AC_BE;
-#endif /* notyet_edca */
+		qid = athn_ac2qid[athn_tx_getac(sc, m)];
 	}
 	else if (type == AR_FRAME_TYPE_PSPOLL) {
 		qos = 0;
@@ -1513,11 +1558,13 @@ ar9003_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 		    (ic->ic_curmode == IEEE80211_MODE_11A) ?
 			ATHN_RIDX_OFDM6 : ATHN_RIDX_CCK1;
 	}
+#ifdef notsupport	/* XXX FBSD80211 fixed rate is not support yet */
 	else if (ic->ic_fixed_rate != -1) {
 		/* Use same fixed rate for all tries. */
 		ridx[0] = ridx[1] = ridx[2] = ridx[3] =
 		    sc->sc_fixed_ridx;
 	}
+#endif
 	else {
 		int txrate = ni->ni_txrate;
 		/* Use fallback table of the node. */
@@ -1654,7 +1701,7 @@ ar9003_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 	/* Check if frame must be protected using RTS/CTS or CTS-to-self. */
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 		/* NB: Group frames are sent using CCK in 802.11b/g. */
-		if (totlen > ic->ic_rtsthreshold) {
+		if (totlen > vap->iv_rtsthreshold) {
 			ds->ds_ctl11 |= AR_TXC11_RTS_ENABLE;
 		}
 		else if ((ic->ic_flags & IEEE80211_F_USEPROT) &&
@@ -2690,6 +2737,7 @@ ar9003_paprd_tx_tone(struct athn_softc *sc)
 {
 #define TONE_LEN	1800
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
 	struct ieee80211_frame *wh;
 	struct ieee80211_node *ni;
 	struct mbuf *m;
@@ -2704,16 +2752,16 @@ ar9003_paprd_tx_tone(struct athn_softc *sc)
 	wh->i_fc[0] = IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_NODATA;
 	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
 	*(uint16_t *)wh->i_dur = htole16(10);	/* XXX */
-	IEEE80211_ADDR_COPY(wh->i_addr1, ic->ic_myaddr);
-	IEEE80211_ADDR_COPY(wh->i_addr2, ic->ic_myaddr);
-	IEEE80211_ADDR_COPY(wh->i_addr3, ic->ic_myaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr1, vap->iv_myaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr2, vap->iv_myaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr3, vap->iv_myaddr);
 	m->m_pkthdr.len = m->m_len = TONE_LEN;
 
 	/* Set gain of training signal. */
 	ar9003_set_training_gain(sc, sc->sc_paprd_curchain);
 
 	/* Transmit training signal. */
-	ni = ieee80211_ref_node(ic->ic_bss);
+	ni = ieee80211_ref_node(vap->iv_bss);
 	if ((error = ar9003_tx(sc, m, ni, ATHN_TXFLAG_PAPRD)) != 0)
 		ieee80211_free_node(ni);
 	return error;

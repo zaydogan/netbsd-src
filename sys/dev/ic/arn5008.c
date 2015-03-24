@@ -259,7 +259,7 @@ ar5008_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 	else
 		sc->sc_rxchainmask = base->rxMask;
 
-	ops->setup(sc);
+	ops->setup(sc, macaddr);
 	return 0;
 }
 
@@ -1105,10 +1105,7 @@ athn_beacon_setup(struct athn_softc *sc, struct athn_tx_buf *bf)
 	    (bf->bf_map->dm_segs[0].ds_len + 3) & ~3);
 }
 
-struct athn_tx_buf *
-athn_beacon_generate(struct athn_softc *sc, struct ieee80211vap *vap);
-
-struct athn_tx_buf *
+Static struct athn_tx_buf *
 athn_beacon_generate(struct athn_softc *sc, struct ieee80211vap *vap)
 {
 	struct ath_vap *avp = ATH_VAP(vap);
@@ -1143,7 +1140,7 @@ athn_beacon_generate(struct athn_softc *sc, struct ieee80211vap *vap)
 
 	/* XXX FBSD80211 what is cabq? */
 
-	athn_beacon_setup(sc, bf);
+	athn_beacon_setup(sc, bf);	/* XXX FBSD80211 function pointer'ed? */
 	bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0, bf->bf_map->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
 
@@ -1429,7 +1426,7 @@ ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 		    IEEE80211_IS_CHAN_5GHZ(ic->ic_curchan) ?
 			ATHN_RIDX_OFDM6 : ATHN_RIDX_CCK1;
 	}
-#ifdef notsupport	/* fixed rate is not support yet */
+#ifdef notsupport	/* XXX FBSD80211 fixed rate is not support yet */
 	else if (ic->ic_fixed_rate != -1) {
 		/* Use same fixed rate for all tries. */
 		ridx[0] = ridx[1] = ridx[2] = ridx[3] =

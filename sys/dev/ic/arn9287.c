@@ -87,7 +87,7 @@ Static void	ar9287_set_power_calib(struct athn_softc *,
 		    struct ieee80211_channel *);
 Static void	ar9287_set_txpower(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
-Static void	ar9287_setup(struct athn_softc *);
+Static void	ar9287_setup(struct athn_softc *, uint8_t [IEEE80211_ADDR_LEN]);
 Static void	ar9287_swap_rom(struct athn_softc *);
 
 PUBLIC int
@@ -112,11 +112,11 @@ ar9287_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 	sc->sc_ini = &ar9287_1_1_ini;
 	sc->sc_serdes = &ar9280_2_0_serdes;
 
-	return ar5008_attach(sc);
+	return ar5008_attach(sc, macaddr);
 }
 
 Static void
-ar9287_setup(struct athn_softc *sc)
+ar9287_setup(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
 	const struct ar9287_eeprom *eep = sc->sc_eep;
 

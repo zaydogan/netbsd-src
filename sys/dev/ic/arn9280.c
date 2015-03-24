@@ -75,7 +75,7 @@ Static void	ar9280_init_from_rom(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
 Static void	ar9280_olpc_init(struct athn_softc *);
 Static void	ar9280_olpc_temp_compensation(struct athn_softc *);
-Static void	ar9280_setup(struct athn_softc *);
+Static void	ar9280_setup(struct athn_softc *, uint8_t [IEEE80211_ADDR_LEN]);
 
 PUBLIC int
 ar9280_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
@@ -99,11 +99,11 @@ ar9280_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 	sc->sc_ini = &ar9280_2_0_ini;
 	sc->sc_serdes = &ar9280_2_0_serdes;
 
-	return ar5008_attach(sc);
+	return ar5008_attach(sc, macaddr);
 }
 
 Static void
-ar9280_setup(struct athn_softc *sc)
+ar9280_setup(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
 	const struct ar5416_eeprom *eep = sc->sc_eep;
 	uint8_t type;

@@ -85,7 +85,7 @@ Static void	ar5416_set_power_calib(struct athn_softc *,
 		    struct ieee80211_channel *);
 Static int	ar5416_set_synth(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
-Static void	ar5416_setup(struct athn_softc *);
+Static void	ar5416_setup(struct athn_softc *, uint8_t [IEEE80211_ADDR_LEN]);
 Static void	ar5416_spur_mitigate(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
 Static void	ar9160_rw_addac(struct athn_softc *,
@@ -117,7 +117,7 @@ ar5416_attach(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 }
 
 Static void
-ar5416_setup(struct athn_softc *sc)
+ar5416_setup(struct athn_softc *sc, uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
 	/* Select ADDAC programming. */
 	if (AR_SREV_9160_11(sc))
