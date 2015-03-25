@@ -386,6 +386,9 @@ struct athn_calib {
 
 #define ATHN_NF_CAL_HIST_MAX	5
 
+typedef	uint16_t	athn_reg_domain_t;	/* regulatory domain code */
+typedef uint16_t	athn_country_code_t;	/* country code */
+
 struct athn_softc;
 
 struct athn_ops {
@@ -498,7 +501,6 @@ struct athn_softc {
 
 	bus_dma_tag_t			sc_dmat;
 
-	callout_t			sc_scan_to;
 	callout_t			sc_calib_to;
 	struct ieee80211_amrr		sc_amrr;
 
@@ -663,18 +665,15 @@ void	athn_rx_start(struct athn_softc *);
 void	athn_set_bss(struct athn_softc *, struct ieee80211_node *);
 int	athn_set_chan(struct athn_softc *, struct ieee80211_channel *,
 	    struct ieee80211_channel *);
-void	athn_set_hostap_timers(struct athn_softc *);
+void	athn_set_hostap_timers(struct athn_softc *, struct ieee80211vap *);
 void	athn_set_led(struct athn_softc *, int);
 void	athn_set_opmode(struct athn_softc *);
 int	athn_set_power_awake(struct athn_softc *);
 void	athn_set_power_sleep(struct athn_softc *);
 void	athn_set_rxfilter(struct athn_softc *, uint32_t);
-void	athn_set_sta_timers(struct athn_softc *);
+void	athn_set_sta_timers(struct athn_softc *, struct ieee80211vap *);
 void	athn_updateslot(struct ifnet *);
-
-#ifdef notyet_edca
-void	athn_updateedca(struct ieee80211com *);
-#endif
+int	athn_updateedca(struct ieee80211com *);
 #ifdef notyet
 void	athn_delete_key(struct ieee80211com *, struct ieee80211_node *,
 	    struct ieee80211_key *);
