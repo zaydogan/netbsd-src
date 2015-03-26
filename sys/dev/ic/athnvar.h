@@ -386,9 +386,6 @@ struct athn_calib {
 
 #define ATHN_NF_CAL_HIST_MAX	5
 
-typedef	uint16_t	athn_reg_domain_t;	/* regulatory domain code */
-typedef uint16_t	athn_country_code_t;	/* country code */
-
 struct athn_softc;
 
 struct athn_ops {

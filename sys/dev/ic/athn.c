@@ -3054,24 +3054,12 @@ athn_update_mcast(struct ifnet *ifp)
 /*
  * regdomain
  */
-
-#include <net80211/ieee80211_regdomain.h>
-#include <dev/ic/athn_regdomain.h>
-#include <dev/ic/athn_regdomain.c>
-
 static int
 athn_setregdomain(struct ieee80211com *ic, struct ieee80211_regdomain *rd,
     int nchan, struct ieee80211_channel chans[])
 {
-	struct athn_softc *sc = ic->ic_ifp->if_softc;
 
-	status = athn_set_channels(ah, chans, nchans,
-	    reg->country, reg->regdomain);
-	if (status != HAL_OK) {
-		aprint_error_dev(sc->sc_dev, "%s: failed, status %u\n",
-		    __func__, status);
-		return EINVAL;		/* XXX */
-	}
+	/* XXX FBSD80211 regdomain */
 
 	return 0;
 }
