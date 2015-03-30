@@ -302,8 +302,6 @@ ieee80211_ifattach(struct ieee80211com *ic,
 
 	ether_ifattach(ifp, macaddr);
 
-	IASSERT(ifp->if_type == IFT_IEEE80211, ("if_type %d", ifp->if_type));
-
 	IEEE80211_LOCK_INIT(ic, ifp->if_xname);
 	IEEE80211_TX_LOCK_INIT(ic, ifp->if_xname);
 	TAILQ_INIT(&ic->ic_vaps);
