@@ -329,7 +329,7 @@ ieee80211_decap(struct ieee80211vap *vap, struct mbuf *m, int hdrlen)
 		break;
 	}
 #ifndef __NO_STRICT_ALIGNMENT
-	if (!ALIGNED_POINTER(mtod(m, caddr_t) + sizeof(*eh), uint32_t)) {
+	if (!ALIGNED_POINTER(mtod(m, char *) + sizeof(*eh), uint32_t)) {
 		m = ieee80211_realign(vap, m, sizeof(*eh));
 		if (m == NULL)
 			return NULL;
