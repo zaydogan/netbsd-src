@@ -143,14 +143,16 @@ ieee80211_chan_init(struct ieee80211com *ic)
 	struct ieee80211_channel *c;
 	int i;
 
+	ic->ic_nchans = IEEE80211_CHAN_MAX;	/* XXX */
 	IASSERT(0 < ic->ic_nchans && ic->ic_nchans <= IEEE80211_CHAN_MAX,
 		("invalid number of channels specified: %u", ic->ic_nchans));
 	memset(ic->ic_chan_avail, 0, sizeof(ic->ic_chan_avail));
 	memset(ic->ic_modecaps, 0, sizeof(ic->ic_modecaps));
 	setbit(ic->ic_modecaps, IEEE80211_MODE_AUTO);
-	for (i = 0; i < ic->ic_nchans; i++) {
+	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 		c = &ic->ic_channels[i];
-		IASSERT(c->ic_flags != 0, ("channel with no flags"));
+		if (c->ic_flags == 0)
+			continue;
 		/*
 		 * Help drivers that work only with frequencies by filling
 		 * in IEEE channel #'s if not already calculated.  Note this
@@ -192,20 +194,19 @@ ieee80211_chan_init(struct ieee80211com *ic)
 			setbit(ic->ic_modecaps, IEEE80211_MODE_11NA);
 		if (IEEE80211_IS_CHAN_HTG(c))
 			setbit(ic->ic_modecaps, IEEE80211_MODE_11NG);
+		if (ic->ic_curchan == NULL) {
+			/* arbitrarily pick the first channel */
+			ic->ic_curchan = c;
+		}
 	}
 	/* initialize candidate channels to all available */
 	memcpy(ic->ic_chan_active, ic->ic_chan_avail,
 		sizeof(ic->ic_chan_avail));
 
-	/* sort channel table to allow lookup optimizations */
-	ieee80211_sort_channels(ic->ic_channels, ic->ic_nchans);
-
 	/* invalidate any previous state */
 	ic->ic_bsschan = IEEE80211_CHAN_ANYC;
 	ic->ic_prevchan = NULL;
 	ic->ic_csa_newchan = NULL;
-	/* arbitrarily pick the first channel */
-	ic->ic_curchan = &ic->ic_channels[0];
 	ic->ic_rt = ieee80211_get_ratetable(ic->ic_curchan);
 
 	/* fillin well-known rate sets if driver has not specified */
@@ -989,8 +990,10 @@ ieee80211_find_channel(struct ieee80211com *ic, int freq, int flags)
 	    (c->ic_flags & IEEE80211_CHAN_ALLTURBO) == flags)
 		return c;
 	/* brute force search */
-	for (i = 0; i < ic->ic_nchans; i++) {
+	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 		c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		if (c->ic_freq == freq &&
 		    (c->ic_flags & IEEE80211_CHAN_ALLTURBO) == flags)
 			return c;
@@ -1015,8 +1018,10 @@ ieee80211_find_channel_byieee(struct ieee80211com *ic, int ieee, int flags)
 	    (c->ic_flags & IEEE80211_CHAN_ALLTURBO) == flags)
 		return c;
 	/* brute force search */
-	for (i = 0; i < ic->ic_nchans; i++) {
+	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 		c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		if (c->ic_ieee == ieee &&
 		    (c->ic_flags & IEEE80211_CHAN_ALLTURBO) == flags)
 			return c;
@@ -1234,8 +1239,10 @@ ieee80211_announce_channels(struct ieee80211com *ic)
 	int i, cw;
 
 	printf("Chan  Freq  CW  RegPwr  MinPwr  MaxPwr\n");
-	for (i = 0; i < ic->ic_nchans; i++) {
+	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 		c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		if (IEEE80211_IS_CHAN_ST(c))
 			type = 'S';
 		else if (IEEE80211_IS_CHAN_108A(c))

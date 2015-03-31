@@ -108,7 +108,7 @@ addchan(struct ieee80211com *ic, int ieee, int flags)
 {
 	struct ieee80211_channel *c;
 
-	c = &ic->ic_channels[ic->ic_nchans++];
+	c = &ic->ic_channels[ieee];
 	c->ic_freq = ieee80211_ieee2mhz(ieee, flags);
 	c->ic_ieee = ieee;
 	c->ic_flags = flags;
@@ -134,6 +134,7 @@ ieee80211_init_channels(struct ieee80211com *ic,
 
 	/* XXX just do something for now */
 	ic->ic_nchans = 0;
+	memset(ic->ic_channels, 0, sizeof(ic->ic_channels));	/* XXX */
 	if (isset(bands, IEEE80211_MODE_11B) ||
 	    isset(bands, IEEE80211_MODE_11G) ||
 	    isset(bands, IEEE80211_MODE_11NG)) {
@@ -209,6 +210,7 @@ ieee80211_init_channels(struct ieee80211com *ic,
 	}
 	if (rd != NULL)
 		ic->ic_regdomain = *rd;
+	ic->ic_nchans = IEEE80211_CHAN_MAX;	/* XXX */
 
 	return 0;
 }
@@ -343,9 +345,11 @@ ieee80211_alloc_countryie(struct ieee80211com *ic)
 		skip |= IEEE80211_CHAN_2GHZ;
 	else if (IEEE80211_IS_CHAN_2GHZ(ic->ic_bsschan))
 		skip |= IEEE80211_CHAN_5GHZ;
-	for (i = 0; i < ic->ic_nchans; i++) {
+	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 		const struct ieee80211_channel *c = &ic->ic_channels[i];
 
+		if (c->ic_flags == 0)			/* not available */
+			continue;
 		if (isset(chans, c->ic_ieee))		/* suppress dup's */
 			continue;
 		if (c->ic_flags & skip)			/* skip band, etc. */
@@ -485,12 +489,12 @@ ieee80211_setregdomain(struct ieee80211vap *vap,
 	/* regdomain parameters */
 	memcpy(&ic->ic_regdomain, &reg->rd, sizeof(reg->rd));
 	/* channel table */
-	memcpy(ic->ic_channels, reg->chaninfo.ic_chans,
-	    reg->chaninfo.ic_nchans * sizeof(struct ieee80211_channel));
-	ic->ic_nchans = reg->chaninfo.ic_nchans;
-	memset(&ic->ic_channels[ic->ic_nchans], 0,
-	    (IEEE80211_CHAN_MAX - ic->ic_nchans) *
-	       sizeof(struct ieee80211_channel));
+	memset(ic->ic_channels, 0, sizeof(ic->ic_channels));
+	for (i = 0; i < reg->chaninfo.ic_nchans; i++) {
+		c = &reg->chaninfo.ic_chans[i];
+		ic->ic_channels[c->ic_ieee] = *c;
+	}
+	ic->ic_nchans = IEEE80211_CHAN_MAX;	/* XXX */
 	ieee80211_media_init(ic);
 
 	/*

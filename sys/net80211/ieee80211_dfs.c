@@ -126,8 +126,12 @@ ieee80211_dfs_reset(struct ieee80211com *ic)
 	/* NB: we assume no locking is needed */
 	/* NB: cac_timer should be cleared by the state machine */
 	callout_halt(&dfs->nol_timer, NULL);
-	for (i = 0; i < ic->ic_nchans; i++)
-		ic->ic_channels[i].ic_state = 0;
+	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
+		struct ieee80211_channel *c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
+		c->ic_state = 0;
+	}
 	dfs->lastchan = NULL;
 }
 
@@ -171,8 +175,10 @@ cac_timeout(void *arg)
 		 * as having completed CAC; this keeps us from
 		 * doing it again until we change channels.
 		 */
-		for (i = 0; i < ic->ic_nchans; i++) {
+		for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 			struct ieee80211_channel *c = &ic->ic_channels[i];
+			if (c->ic_flags == 0)
+				continue;
 			if (c->ic_freq == ic->ic_curchan->ic_freq)
 				c->ic_state |= IEEE80211_CHANSTATE_CACDONE;
 		}
@@ -232,8 +238,10 @@ ieee80211_dfs_cac_clear(struct ieee80211com *ic,
 {
 	int i;
 
-	for (i = 0; i < ic->ic_nchans; i++) {
+	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 		struct ieee80211_channel *c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		if (c->ic_freq == chan->ic_freq)
 			c->ic_state &= ~IEEE80211_CHANSTATE_CACDONE;
 	}
@@ -250,8 +258,10 @@ dfs_timeout(void *arg)
 	IEEE80211_LOCK(ic);
 
 	now = oldest = ticks;
-	for (i = 0; i < ic->ic_nchans; i++) {
+	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 		c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		if (IEEE80211_IS_CHAN_RADAR(c)) {
 			if (time_after_eq(now, dfs->nol_event[i]+NOL_TIMEOUT)) {
 				c->ic_state &= ~IEEE80211_CHANSTATE_RADAR;
@@ -336,8 +346,10 @@ ieee80211_dfs_notify_radar(struct ieee80211com *ic, struct ieee80211_channel *ch
 		 * thread if not already running.
 		 */
 		now = ticks;
-		for (i = 0; i < ic->ic_nchans; i++) {
+		for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 			struct ieee80211_channel *c = &ic->ic_channels[i];
+			if (c->ic_flags == 0)
+				continue;
 			if (c->ic_freq == chan->ic_freq) {
 				c->ic_state &= ~IEEE80211_CHANSTATE_CACDONE;
 				c->ic_state |= IEEE80211_CHANSTATE_RADAR;
@@ -431,15 +443,19 @@ ieee80211_dfs_pickchannel(struct ieee80211com *ic)
 	 * been detected).
 	 */
 	get_random_bytes(&v, sizeof(v));
-	v %= ic->ic_nchans;
-	for (i = v; i < ic->ic_nchans; i++) {
+	v %= IEEE80211_CHAN_MAX;
+	for (i = v; i < IEEE80211_CHAN_MAX; i++) {
 		c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		if (!IEEE80211_IS_CHAN_RADAR(c) &&
 		   (c->ic_flags & flags) == flags)
 			return c;
 	}
 	for (i = 0; i < v; i++) {
 		c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		if (!IEEE80211_IS_CHAN_RADAR(c) &&
 		   (c->ic_flags & flags) == flags)
 			return c;

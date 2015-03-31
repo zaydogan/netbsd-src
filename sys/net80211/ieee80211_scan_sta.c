@@ -421,13 +421,17 @@ find11gchannel(struct ieee80211com *ic, int i, int freq)
 	 * immediately followed by g so optimize the search for
 	 * this.  We'll still do a full search just in case.
 	 */
-	for (j = i+1; j < ic->ic_nchans; j++) {
+	for (j = i+1; j < IEEE80211_CHAN_MAX; j++) {
 		c = &ic->ic_channels[j];
+		if (c->ic_flags == 0)
+			continue;
 		if (c->ic_freq == freq && IEEE80211_IS_CHAN_G(c))
 			return c;
 	}
 	for (j = 0; j < i; j++) {
 		c = &ic->ic_channels[j];
+		if (c->ic_flags == 0)
+			continue;
 		if (c->ic_freq == freq && IEEE80211_IS_CHAN_G(c))
 			return c;
 	}
@@ -527,6 +531,8 @@ sweepchannels(struct ieee80211_scan_state *ss, struct ieee80211vap *vap,
 			break;
 
 		c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		/*
 		 * Ignore dynamic turbo channels; we scan them
 		 * in normal mode (i.e. not boosted).  Likewise

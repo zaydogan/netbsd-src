@@ -1709,8 +1709,10 @@ ieee80211_ioctl_setchanlist(struct ieee80211vap *vap, struct ieee80211req *ireq)
 	nchan = 0;
 	chanlist = list + ireq->i_len;		/* NB: zero'd already */
 	maxchan = ireq->i_len * NBBY;
-	for (i = 0; i < ic->ic_nchans; i++) {
+	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 		const struct ieee80211_channel *c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		/*
 		 * Calculate the intersection of the user list and the
 		 * available channels so users can do things like specify
@@ -1863,14 +1865,18 @@ find11gchannel(struct ieee80211com *ic, int start, int freq)
 	const struct ieee80211_channel *c;
 	int i;
 
-	for (i = start+1; i < ic->ic_nchans; i++) {
+	for (i = start+1; i < IEEE80211_CHAN_MAX; i++) {
 		c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		if (c->ic_freq == freq && IEEE80211_IS_CHAN_ANYG(c))
 			return 1;
 	}
 	/* NB: should not be needed but in case things are mis-sorted */
 	for (i = 0; i < start; i++) {
 		c = &ic->ic_channels[i];
+		if (c->ic_flags == 0)
+			continue;
 		if (c->ic_freq == freq && IEEE80211_IS_CHAN_ANYG(c))
 			return 1;
 	}
@@ -1899,9 +1905,11 @@ findchannel(struct ieee80211com *ic, int ieee, int mode)
 	int i;
 
 	modeflags = chanflags[mode];
-	for (i = 0; i < ic->ic_nchans; i++) {
+	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
 		struct ieee80211_channel *c = &ic->ic_channels[i];
 
+		if (c->ic_flags == 0)
+			continue;
 		if (c->ic_ieee != ieee)
 			continue;
 		if (mode == IEEE80211_MODE_AUTO) {
