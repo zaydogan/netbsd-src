@@ -3553,7 +3553,7 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 	struct ieee80211vap *vap = ifp->if_softc;
 	struct ieee80211com *ic = vap->iv_ic;
 #else
-	struct ieee80211com *ic = ifp->if_softc;
+	struct ieee80211com *ic = ieee80211_find_instance(ifp);
 	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
 #endif
 	struct ifreq *ifr = (struct ifreq *)data;
@@ -3575,6 +3575,12 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 #ifdef COMPAT_70
 	struct ieee80211_stats70 stats70;
 #endif /* COMPAT_70 */
+
+	if (ic == NULL)
+		return ENXIO;
+	/* XXX FBSD80211 AP mode setting? */
+	if (vap == NULL)
+		return ENXIO;
 
 	switch (cmd) {
 	case SIOCSIFFLAGS:
@@ -3613,6 +3619,10 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 		error = ifmedia_ioctl(ifp, ifr, &vap->iv_media, cmd);
 		break;
 	case SIOCG80211:
+		if (vap == NULL) {
+			error = ENXIO;
+			break;
+		}
 		error = ieee80211_ioctl_get80211(vap, cmd,
 				(struct ieee80211req *) data);
 		break;

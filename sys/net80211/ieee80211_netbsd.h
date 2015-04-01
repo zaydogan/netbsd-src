@@ -415,6 +415,10 @@ void	ieee80211_load_module(const char *);
 
 void	ieee80211_netbsd_init(void);
 
+void	ieee80211_add_instance(struct ieee80211com *);
+void	ieee80211_remove_instance(struct ieee80211com *);
+struct ieee80211com *ieee80211_find_instance(struct ifnet *);
+
 #ifdef notyet 	/* XXX FBSD80211 module */
 /*
  * A "policy module" is an adjunct module to net80211 that provides

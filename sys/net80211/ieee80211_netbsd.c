@@ -75,11 +75,18 @@ SYSCTL_INT(_net_wlan, OID_AUTO, debug, CTLFLAG_RW, &ieee80211_debug,
 #endif
 #endif
 
+/* list of all instances */
+SLIST_HEAD(ieee80211_list, ieee80211com);
+static struct ieee80211_list ieee80211_list =
+	SLIST_HEAD_INITIALIZER(ieee80211_list);
+static kmutex_t *ieee80211_list_lock;
+
 static int
 ieee80211_netbsd_init0(void)
 {
 
-	/* XXX FBSD80211 Nothing to do? */
+	KASSERT(ieee80211_list_lock == NULL);
+	ieee80211_list_lock = mutex_obj_alloc(MUTEX_DEFAULT, IPL_NET);
 
 	return 0;
 }
@@ -90,6 +97,41 @@ ieee80211_netbsd_init(void)
 	static ONCE_DECL(ieee80211_init_once);
 
 	RUN_ONCE(&ieee80211_init_once, ieee80211_netbsd_init0);
+	KASSERT(ieee80211_list_lock != NULL);
+}
+
+void
+ieee80211_add_instance(struct ieee80211com *ic)
+{
+
+	KASSERT(ic->ic_next == NULL);
+	mutex_enter(ieee80211_list_lock);
+	SLIST_INSERT_HEAD(&ieee80211_list, ic, ic_next);
+	mutex_exit(ieee80211_list_lock);
+}
+
+void
+ieee80211_remove_instance(struct ieee80211com *ic)
+{
+
+	KASSERT(ic->ic_next != NULL);
+	mutex_enter(ieee80211_list_lock);
+	SLIST_REMOVE(&ieee80211_list, ic, ieee80211com, ic_next);
+	mutex_exit(ieee80211_list_lock);
+}
+
+struct ieee80211com *
+ieee80211_find_instance(struct ifnet *ifp)
+{
+	struct ieee80211com *ic;
+
+	/* XXX not right for multiple instances but works for now */
+	mutex_enter(ieee80211_list_lock);
+	SLIST_FOREACH(ic, &ieee80211_list, ic_next)
+		if (ic->ic_ifp == ifp)
+			break;
+	mutex_exit(ieee80211_list_lock);
+	return ic;
 }
 
 #ifdef notyet	/* XXX FBSD80211 ??? */

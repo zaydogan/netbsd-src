@@ -118,6 +118,7 @@ struct ieee80211_superg;
 struct ieee80211_frame;
 
 struct ieee80211com {
+	SLIST_ENTRY(ieee80211com) ic_next;
 	struct ifnet		*ic_ifp;	/* associated device */
 	ieee80211_com_lock_t	ic_comlock;	/* state update lock */
 	ieee80211_tx_lock_t	ic_txlock;	/* ic/vap TX lock */

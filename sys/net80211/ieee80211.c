@@ -357,6 +357,8 @@ ieee80211_ifattach(struct ieee80211com *ic,
 #ifdef notyet	/* XXX FBSD80211 vnet */
 	CURVNET_RESTORE();
 #endif
+
+	ieee80211_add_instance(ic);
 }
 
 /*
@@ -370,6 +372,8 @@ ieee80211_ifdetach(struct ieee80211com *ic)
 {
 	struct ifnet *ifp = ic->ic_ifp;
 	struct ieee80211vap *vap;
+
+	ieee80211_remove_instance(ic);
 
 	/*
 	 * This detaches the main interface, but not the vaps.
@@ -615,6 +619,8 @@ ieee80211_vap_attach(struct ieee80211vap *vap,
 	ieee80211_syncifflag_locked(ic, IFF_ALLMULTI);
 	IEEE80211_UNLOCK(ic);
 
+	ieee80211_add_instance(ic);
+
 	return 1;
 }
 
@@ -629,6 +635,8 @@ ieee80211_vap_detach(struct ieee80211vap *vap)
 {
 	struct ieee80211com *ic = vap->iv_ic;
 	struct ifnet *ifp = vap->iv_ifp;
+
+	ieee80211_remove_instance(ic);
 
 #ifdef notyet	/* XXX FBSD80211 vnet */
 	CURVNET_SET(ifp->if_vnet);
