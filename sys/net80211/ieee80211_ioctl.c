@@ -3619,10 +3619,6 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 		error = ifmedia_ioctl(ifp, ifr, &vap->iv_media, cmd);
 		break;
 	case SIOCG80211:
-		if (vap == NULL) {
-			error = ENXIO;
-			break;
-		}
 		error = ieee80211_ioctl_get80211(vap, cmd,
 				(struct ieee80211req *) data);
 		break;
