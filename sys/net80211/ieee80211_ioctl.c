@@ -3546,16 +3546,14 @@ ieee80211_get_stats70(struct ieee80211_stats70 *ostats,
 #undef	COPYSTATS
 #endif /* COMPAT_70 */
 
+/*
+ * for wlan(4)
+ */
 int
-ieee80211_ioctl(struct ifnet *ifp, u_long cmd, void *data)
+ieee80211_vap_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
-#ifdef notyet	/* XXX FBSD80211 vap has no interface */
 	struct ieee80211vap *vap = ifp->if_softc;
 	struct ieee80211com *ic = vap->iv_ic;
-#else
-	struct ieee80211com *ic = ieee80211_find_instance(ifp);
-	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
-#endif
 	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa;			/* XXX */
 	int i, kid, klen;
@@ -3575,12 +3573,6 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 #ifdef COMPAT_70
 	struct ieee80211_stats70 stats70;
 #endif /* COMPAT_70 */
-
-	if (ic == NULL)
-		return ENXIO;
-	/* XXX FBSD80211 AP mode setting? */
-	if (vap == NULL)
-		return ENXIO;
 
 	switch (cmd) {
 	case SIOCSIFFLAGS:
@@ -3959,6 +3951,30 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
+	return error;
+}
+
+/*
+ * for physical wireless device
+ */
+int
+ieee80211_ioctl(struct ifnet *ifp, u_long cmd, void *data)
+{
+	struct ieee80211com *ic = ieee80211_find_instance(ifp);
+#if 0	/* notyet */
+	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
+#endif
+	int error = 0;
+
+	if (ic == NULL)
+		return ENXIO;
+
+	switch (cmd) {
+	default:
+		error = ether_ioctl(ifp, cmd, data);
+		break;
+	}
+
 	return error;
 }
 #endif

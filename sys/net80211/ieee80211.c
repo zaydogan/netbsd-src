@@ -458,7 +458,7 @@ ieee80211_vap_setup(struct ieee80211com *ic, struct ieee80211vap *vap,
 	ifp->if_transmit = ieee80211_vap_transmit;
 	ifp->if_qflush = ieee80211_vap_qflush;
 #endif
-	ifp->if_ioctl = ieee80211_ioctl;
+	ifp->if_ioctl = ieee80211_vap_ioctl;
 	ifp->if_init = ieee80211_init;
 
 	vap->iv_ifp = ifp;
