@@ -53,6 +53,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <net/if.h>
 #include <net/if_dl.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
 #include <net/route.h>
@@ -75,6 +76,12 @@ SYSCTL_INT(_net_wlan, OID_AUTO, debug, CTLFLAG_RW, &ieee80211_debug,
 #endif
 #endif
 
+static int	wlan_clone_create(struct if_clone *, int);
+static int	wlan_clone_destroy(struct ifnet *);
+
+static struct if_clone wlan_cloner =
+    IF_CLONE_INITIALIZER("wlan", wlan_clone_create, wlan_clone_destroy);
+
 /* list of all instances */
 SLIST_HEAD(ieee80211_list, ieee80211com);
 static struct ieee80211_list ieee80211_list =
@@ -87,6 +94,8 @@ ieee80211_netbsd_init0(void)
 
 	KASSERT(ieee80211_list_lock == NULL);
 	ieee80211_list_lock = mutex_obj_alloc(MUTEX_DEFAULT, IPL_NET);
+
+	if_clone_attach(&wlan_cloner);
 
 	return 0;
 }
@@ -134,97 +143,83 @@ ieee80211_find_instance(struct ifnet *ifp)
 	return ic;
 }
 
-#ifdef notyet	/* XXX FBSD80211 ??? */
-/*
- * Allocate/free com structure in conjunction with ifnet;
- * these routines are registered with if_register_com_alloc
- * below and are called automatically by the ifnet code
- * when the ifnet of the parent device is created.
- */
-static void *
-wlan_alloc(u_char type, struct ifnet *ifp)
+static int
+wlan_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
-	struct ieee80211com *ic;
+	int error = 0;
+	int s;
 
-	ic = malloc(sizeof(struct ieee80211com), M_80211_COM, M_WAITOK|M_ZERO);
-	ic->ic_ifp = ifp;
+	s = splnet();
 
-	return (ic);
-}
+	switch (cmd) {
+	case SIOCSIFFLAGS:
+		error = ifioctl_common(ifp, cmd, data);
+		break;
 
-static void
-wlan_free(void *ic, u_char type)
-{
-	free(ic, M_80211_COM);
+#if 0
+#ifdef OSIOCSIFMEDIA
+	case OSIOCSIFMEDIA:
+#endif
+	case SIOCSIFMEDIA:
+	case SIOCGIFMEDIA:
+		error = ifmedia_ioctl(ifp, (struct ifreq *)data, &sc->sc_im, cmd);
+		break;
+#endif
+
+	default:
+		error = ether_ioctl(ifp, cmd, data);
+		break;
+	}
+
+	splx(s);
+
+	return error;
 }
 
 static int
-wlan_clone_create(struct if_clone *ifc, int unit, void *params)
+wlan_clone_create(struct if_clone *ifc, int unit)
 {
-	struct ieee80211_clone_params cp;
-	struct ieee80211vap *vap;
-	struct ieee80211com *ic;
 	struct ifnet *ifp;
-	int error;
 
-	error = copyin(params, &cp, sizeof(cp));
-	if (error)
-		return error;
-	ifp = ifunit(cp.icp_parent);
+	ifp = if_alloc(IFT_ETHER);
 	if (ifp == NULL)
-		return ENXIO;
-	/* XXX move printfs to DIAGNOSTIC before release */
-	if (ifp->if_type != IFT_IEEE80211) {
-		if_printf(ifp, "%s: reject, not an 802.11 device\n", __func__);
-		return ENXIO;
-	}
-	if (cp.icp_opmode >= IEEE80211_OPMODE_MAX) {
-		if_printf(ifp, "%s: invalid opmode %d\n",
-		    __func__, cp.icp_opmode);
-		return EINVAL;
-	}
-	ic = ifp->if_l2com;
-	if ((ic->ic_caps & ieee80211_opcap[cp.icp_opmode]) == 0) {
-		if_printf(ifp, "%s mode not supported\n",
-		    ieee80211_opmode_name[cp.icp_opmode]);
-		return EOPNOTSUPP;
-	}
-	if ((cp.icp_flags & IEEE80211_CLONE_TDMA) &&
-#ifdef IEEE80211_SUPPORT_TDMA
-	    (ic->ic_caps & IEEE80211_C_TDMA) == 0
-#else
-	    (1)
-#endif
-	) {
-		if_printf(ifp, "TDMA not supported\n");
-		return EOPNOTSUPP;
-	}
-	vap = ic->ic_vap_create(ic, wlanname, unit,
-			cp.icp_opmode, cp.icp_flags, cp.icp_bssid,
-			cp.icp_flags & IEEE80211_CLONE_MACADDR ?
-			    cp.icp_macaddr : (const uint8_t *)IF_LLADDR(ifp));
+		return ENOMEM;
 
-	return (vap == NULL ? EIO : 0);
+	if_initname(ifp, ifc->ifc_name, unit);
+	ifp->if_flags = IFF_SIMPLEX | IFF_BROADCAST | IFF_MULTICAST;
+	ifp->if_mtu = IEEE80211_MTU_MAX;
+	ifp->if_dlt = DLT_IEEE802;
+	ifp->if_init = (void *)nullop;
+	ifp->if_start = (void *)nullop;
+	ifp->if_stop = (void *)nullop;
+	ifp->if_output = (void *)nullop;
+	ifp->if_ioctl = wlan_ioctl;
+
+	if_attach(ifp);
+	if_alloc_sadl(ifp);
+
+	return 0;
 }
 
-static void
+static int
 wlan_clone_destroy(struct ifnet *ifp)
 {
-	struct ieee80211vap *vap = ifp->if_softc;
-	struct ieee80211com *ic = vap->iv_ic;
 
-	ic->ic_vap_delete(vap);
+	if_detach(ifp);
+
+	if (ifp->if_softc != NULL) {
+		/* XXX implement me! */
+	}
+	if_free(ifp);
+
+	return 0;
 }
-#endif	/* XXX FBSD80211 ??? */
 
 void
 ieee80211_vap_destroy(struct ieee80211vap *vap)
 {
-#ifdef notyet	/* XXX FBSD80211 vnet if_clone */
-	CURVNET_SET(vap->iv_ifp->if_vnet);
-	if_clone_destroyif(wlan_cloner, vap->iv_ifp);
-	CURVNET_RESTORE();
-#endif
+
+	if_clone_destroy(vap->iv_ifp->if_xname);
 }
 
 #ifdef notyet	/* XXX FBSD80211 sysctl */

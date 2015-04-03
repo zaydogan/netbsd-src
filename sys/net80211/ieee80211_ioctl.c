@@ -3574,6 +3574,8 @@ ieee80211_vap_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 	struct ieee80211_stats70 stats70;
 #endif /* COMPAT_70 */
 
+printf("%s: ifp=%p, cmd=%lx, data=%p, vap=%p\n", __func__, ifp, cmd, data, vap);
+
 	switch (cmd) {
 	case SIOCSIFFLAGS:
 		IEEE80211_LOCK(ic);
@@ -3961,7 +3963,7 @@ int
 ieee80211_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct ieee80211com *ic = ieee80211_find_instance(ifp);
-#if 0	/* notyet */
+#if 0
 	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
 #endif
 	int error = 0;
@@ -3970,6 +3972,50 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 		return ENXIO;
 
 	switch (cmd) {
+#if 0
+	case SIOCSIFFLAGS:
+	case SIOCADDMULTI:
+	case SIOCDELMULTI:
+#ifdef OSIOCSIFMEDIA
+	case OSIOCSIFMEDIA:
+#endif
+	case SIOCSIFMEDIA:
+	case SIOCGIFMEDIA:
+	case SIOCG80211:
+	case SIOCS80211:
+	case SIOCS80211NWID:
+	case SIOCG80211NWID:
+	case SIOCS80211NWKEY:
+	case SIOCG80211NWKEY:
+	case SIOCS80211POWER:
+	case SIOCG80211POWER:
+	case SIOCS80211BSSID:
+	case SIOCG80211BSSID:
+	case SIOCS80211CHANNEL:
+	case SIOCG80211CHANNEL:
+#ifdef notyet	/* XXX FBSD80211 wi compat */
+	case SIOCGIFGENERIC:
+	case SIOCSIFGENERIC:
+#endif
+#ifdef COMPAT_20
+	case OOSIOCG80211STATS:
+	case OOSIOCG80211ZSTATS:
+#endif /* COMPAT_20 */
+#ifdef COMPAT_70
+	case OSIOCG80211STATS:
+	case OSIOCG80211ZSTATS:
+#endif /* COMPAT_70 */
+	case SIOCG80211ZSTATS:
+	case SIOCG80211STATS:
+	case SIOCSIFMTU:
+	case SIOCSIFADDR:
+	case SIOCGDRVSPEC:
+	case SIOCSDRVSPEC:
+		if (vap == NULL) {
+		}
+		error = ieee80211_vap_ioctl(vap->iv_ifp, cmd, data);
+		break;
+#endif
 	default:
 		error = ether_ioctl(ifp, cmd, data);
 		break;
