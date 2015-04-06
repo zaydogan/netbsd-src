@@ -717,6 +717,14 @@ struct ieee80211req_sta_vlan {
 };
 
 /*
+ * Get/set wlan device and opmode.
+ */
+struct ieee80211req_wlan_dev_opmode {
+	char		wdo_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	int		wdo_opmode;		/* IEEE80211_M_* */
+};
+
+/*
  * FreeBSD-style ioctls.
  */
 /* the first member must be matched with struct ifreq */
@@ -865,6 +873,7 @@ struct ieee80211req {
 #define	IEEE80211_IOC_RIFS		111	/* RIFS config (on, off) */
 #define	IEEE80211_IOC_GREENFIELD	112	/* Greenfield (on, off) */
 #define	IEEE80211_IOC_STBC		113	/* STBC Tx/RX (on, off) */
+#define	IEEE80211_IOC_WLAN_DEV_OPMODE	114	/* wlan dev and opmode */
 
 #define	IEEE80211_IOC_MESH_ID		170	/* mesh identifier */
 #define	IEEE80211_IOC_MESH_AP		171	/* accepting peerings */

@@ -42,6 +42,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/kernel.h>
 #include <sys/systm.h> 
 #include <sys/cprng.h>   
+#include <sys/kauth.h>
 #include <sys/mbuf.h>   
 #include <sys/module.h>
 #include <sys/once.h>
@@ -146,6 +147,8 @@ ieee80211_find_instance(struct ifnet *ifp)
 static int
 wlan_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
+	struct ieee80211req *req;
+	struct ieee80211req_wlan_dev_opmode *wdo;
 	int error = 0;
 	int s;
 
@@ -156,15 +159,26 @@ wlan_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 		error = ifioctl_common(ifp, cmd, data);
 		break;
 
-#if 0
-#ifdef OSIOCSIFMEDIA
-	case OSIOCSIFMEDIA:
-#endif
-	case SIOCSIFMEDIA:
-	case SIOCGIFMEDIA:
-		error = ifmedia_ioctl(ifp, (struct ifreq *)data, &sc->sc_im, cmd);
+	case SIOCS80211:
+		error = kauth_authorize_network(curlwp->l_cred,
+		    KAUTH_NETWORK_INTERFACE,
+		    KAUTH_REQ_NETWORK_INTERFACE_SETPRIV, ifp, (void *)cmd,
+		    NULL);
+		if (error != 0)
+			break;
+		req = (struct ieee80211req *)data;
+		switch (req->i_type) {
+		case IEEE80211_IOC_WLAN_DEV_OPMODE:
+			wdo = req->i_data;
+			printf("%s: wlandev=%s\n", __func__, wdo->wdo_name);
+			printf("%s: wlanmode=%d\n", __func__, wdo->wdo_opmode);
+			break;
+
+		default:
+			break;
+		}
 		break;
-#endif
+
 
 	default:
 		error = ether_ioctl(ifp, cmd, data);

@@ -21,3 +21,4 @@ SRCS+= parse.c
 SRCS+= tunnel.c
 SRCS+= util.c
 SRCS+= vlan.c
+SRCS+= wlan.c
