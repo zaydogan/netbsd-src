@@ -34,6 +34,7 @@ file	net80211/ieee80211_power.c		wlan
 file	net80211/ieee80211_proto.c		wlan
 file	net80211/ieee80211_radiotap.c		wlan
 file	net80211/ieee80211_ratectl.c		wlan
+file	net80211/ieee80211_ratectl_none.c	wlan
 file	net80211/ieee80211_regdomain.c		wlan
 file	net80211/ieee80211_rssadapt.c		wlan
 file	net80211/ieee80211_scan.c		wlan
