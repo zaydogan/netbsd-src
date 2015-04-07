@@ -963,11 +963,8 @@ void
 ieee80211_load_module(const char *modname)
 {
 
-#ifdef notyet
-	(void)kern_kldload(curthread, modname, NULL);
-#else
-	printf("%s: load the %s module by hand for now.\n", __func__, modname);
-#endif
+	if (module_autoload(modname, MODULE_CLASS_MISC))
+		aprint_error("load the %s module by hand for now.\n", modname);
 }
 
 #ifdef notyet	/* XXX FBSD80211 module */
