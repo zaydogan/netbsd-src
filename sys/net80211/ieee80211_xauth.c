@@ -78,8 +78,24 @@ static const struct ieee80211_authenticator xauth = {
 	.ia_node_join	= NULL,
 	.ia_node_leave	= NULL,
 };
-#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_AUTH_MODULE(xauth, 1);
 IEEE80211_AUTH_ALG(x8021x, IEEE80211_AUTH_8021X, xauth);
 IEEE80211_AUTH_ALG(wpa, IEEE80211_AUTH_WPA, xauth);
-#endif
+#ifdef __NetBSD__
+static int
+wlan_auth_xauth_modcmd(modcmd_t cmd, void *arg)
+{
+	switch (cmd) {
+	case MODULE_CMD_INIT:
+		ieee80211_authenticator_register(IEEE80211_AUTH_8021X, &xauth);
+		ieee80211_authenticator_register(IEEE80211_AUTH_WPA, &xauth);
+		return 0;
+	case MODULE_CMD_FINI:
+		ieee80211_authenticator_unregister(IEEE80211_AUTH_8021X);
+		ieee80211_authenticator_unregister(IEEE80211_AUTH_WPA);
+		return 0;
+	default:
+		return ENOTTY;
+	}
+}
+#endif	/* __NetBSD__ */
