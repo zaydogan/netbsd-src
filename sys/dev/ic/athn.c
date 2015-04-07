@@ -269,6 +269,7 @@ athn_attach(struct athn_softc *sc)
 	/* Set device capabilities. */
 	ic->ic_caps =
 	    IEEE80211_C_WPA |		/* 802.11i */
+	    IEEE80211_C_STA |		/* Station mode supported. */
 #ifndef IEEE80211_STA_ONLY
 	    IEEE80211_C_HOSTAP |	/* Host AP mode supported. */
 // XXX?	    IEEE80211_C_APPMGT |	/* Host AP power saving supported. */
