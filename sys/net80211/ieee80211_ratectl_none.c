@@ -101,10 +101,12 @@ none_setinterval(const struct ieee80211vap *vap, int msecs)
 {
 }
 
+#ifdef notyet
 /* number of references from net80211 layer */
 static	int nrefs = 0;
+#endif
 
-static const struct ieee80211_ratectl none = {
+static const struct ieee80211_ratectl ratectl_none = {
 	.ir_name	= "none",
 	.ir_attach	= NULL,
 	.ir_detach	= NULL,
@@ -117,5 +119,5 @@ static const struct ieee80211_ratectl none = {
 	.ir_tx_update	= none_tx_update,
 	.ir_setinterval	= none_setinterval,
 };
-IEEE80211_RATECTL_MODULE(ratectl_none, 1);
-IEEE80211_RATECTL_ALG(none, IEEE80211_RATECTL_NONE, none);
+IEEE80211_RATECTL_MODULE(none, 1);
+IEEE80211_RATECTL_ALG(none, IEEE80211_RATECTL_NONE, ratectl_none);

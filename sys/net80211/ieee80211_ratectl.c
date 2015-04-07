@@ -47,11 +47,11 @@ __KERNEL_RCSID(0, "$NetBSD$");
 static const struct ieee80211_ratectl *ratectls[IEEE80211_RATECTL_MAX];
 
 static const char *ratectl_modnames[IEEE80211_RATECTL_MAX] = {
-	[IEEE80211_RATECTL_AMRR]	= "wlan_amrr",
-	[IEEE80211_RATECTL_RSSADAPT]	= "wlan_rssadapt",
-	[IEEE80211_RATECTL_ONOE]	= "wlan_onoe",
-	[IEEE80211_RATECTL_SAMPLE]	= "wlan_sample",
-	[IEEE80211_RATECTL_NONE]	= "wlan_none",
+	[IEEE80211_RATECTL_AMRR]	= "wlan_ratectl_amrr",
+	[IEEE80211_RATECTL_RSSADAPT]	= "wlan_ratectl_rssadapt",
+	[IEEE80211_RATECTL_ONOE]	= "wlan_ratectl_onoe",
+	[IEEE80211_RATECTL_SAMPLE]	= "wlan_ratectl_sample",
+	[IEEE80211_RATECTL_NONE]	= "wlan_ratectl_none",
 };
 
 void

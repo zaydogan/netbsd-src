@@ -112,10 +112,8 @@ static const struct ieee80211_ratectl rssadapt = {
 	.ir_tx_update	= NULL,
 	.ir_setinterval	= rssadapt_setinterval,
 };
-#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_RATECTL_MODULE(rssadapt, 1);
 IEEE80211_RATECTL_ALG(rssadapt, IEEE80211_RATECTL_RSSADAPT, rssadapt);
-#endif
 
 static void
 rssadapt_setinterval(const struct ieee80211vap *vap, int msecs)

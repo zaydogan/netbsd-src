@@ -33,6 +33,7 @@
 #include <sys/kmem.h>
 #include <sys/lock.h>
 #include <sys/mbuf.h>
+#include <sys/module.h>
 #include <sys/mutex.h>
 #include <sys/rwlock.h>
 #include <sys/sysctl.h>
@@ -550,8 +551,23 @@ TEXT_SET(ratectl##_set, alg##_modevent)
 #define	IEEE80211_SCANNER_MODULE(name, version)
 #define	IEEE80211_ACL_MODULE(name, alg, version)
 #define	IEEE80211_AUTH_MODULE(name, version)
-#define	IEEE80211_RATECTL_MODULE(alg, version)
-#define	IEEE80211_RATECTL_ALG(name, alg, v)
+#define	IEEE80211_RATECTL_MODULE(alg, version)				\
+MODULE(MODULE_CLASS_MISC, wlan_ratectl_##alg, NULL)
+#define	IEEE80211_RATECTL_ALG(name, alg, v)				\
+static int								\
+wlan_ratectl_##name##_modcmd(modcmd_t cmd, void *arg)			\
+{									\
+	switch (cmd) {							\
+	case MODULE_CMD_INIT:						\
+		ieee80211_ratectl_register(alg, &v);			\
+		return 0;						\
+	case MODULE_CMD_FINI:						\
+		ieee80211_ratectl_unregister(alg);			\
+		return 0;						\
+	default:							\
+		return ENOTTY;						\
+	}								\
+}
 #endif	/* XXX FBSD80211 module */
 
 #ifdef notyet	/* XXX FBSDNET80211 ioctl */
