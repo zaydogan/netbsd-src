@@ -84,7 +84,7 @@ int athn_debug = 0;
 #endif
 
 static struct ieee80211vap *athn_vap_create(struct ieee80211com *,
-		    const char [IFNAMSIZ], int, enum ieee80211_opmode, int,
+		    struct ifnet *, enum ieee80211_opmode, int,
 		    const uint8_t [IEEE80211_ADDR_LEN],
 		    const uint8_t [IEEE80211_ADDR_LEN]);
 static void	athn_vap_delete(struct ieee80211vap *);
@@ -394,7 +394,7 @@ athn_detach(struct athn_softc *sc)
 }
 
 static struct ieee80211vap *
-athn_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
+athn_vap_create(struct ieee80211com *ic, struct ifnet *ifp,
     enum ieee80211_opmode opmode, int flags,
     const uint8_t bssid[IEEE80211_ADDR_LEN],
     const uint8_t macaddr[IEEE80211_ADDR_LEN])
@@ -414,7 +414,7 @@ athn_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 	if (avp == NULL)
 		return NULL;
 	vap = &avp->av_vap;
-	ieee80211_vap_setup(ic, vap, name, unit, opmode, flags, bssid, vapaddr);
+	ieee80211_vap_setup(ic, ifp, vap, opmode, flags, bssid, vapaddr);
 	vap->iv_bmissthreshold = 10;		/* override default */
 	/* Override with driver methods. */
 	avp->av_newstate = vap->iv_newstate;

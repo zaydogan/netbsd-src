@@ -438,20 +438,12 @@ default_reset(struct ieee80211vap *vap, u_long cmd)
  * them with ieee80211_vap_attach (below).
  */
 int
-ieee80211_vap_setup(struct ieee80211com *ic, struct ieee80211vap *vap,
-    const char name[IFNAMSIZ], int unit, enum ieee80211_opmode opmode,
+ieee80211_vap_setup(struct ieee80211com *ic, struct ifnet *ifp,
+    struct ieee80211vap *vap, enum ieee80211_opmode opmode,
     int flags, const uint8_t bssid[IEEE80211_ADDR_LEN],
     const uint8_t macaddr[IEEE80211_ADDR_LEN])
 {
-	struct ifnet *ifp;
 
-	ifp = if_alloc(IFT_ETHER);
-	if (ifp == NULL) {
-		if_printf(ic->ic_ifp, "%s: unable to allocate ifnet\n",
-		    __func__);
-		return ENOMEM;
-	}
-	if_initname(ifp, name, unit);
 	ifp->if_softc = vap;			/* back pointer */
 	ifp->if_flags = IFF_SIMPLEX | IFF_BROADCAST | IFF_MULTICAST;
 #ifdef notyet	/* XXX FBSD80211 if_transmit qflush */
