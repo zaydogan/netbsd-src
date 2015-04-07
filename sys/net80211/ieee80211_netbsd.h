@@ -364,8 +364,8 @@ M_WME_GETAC(const struct mbuf *m)
 	struct m_tag *mtag = m_tag_find(m, PACKET_TAG_IEEE80211_WME_AC, NULL);
 	if (mtag == NULL)
 		return 0;
-	u_int *vlan_id = (u_int *)(mtag + 1);
-	return *vlan_id;
+	u_int *wme_ac = (u_int *)(mtag + 1);
+	return *wme_ac;
 }
 
 /*
