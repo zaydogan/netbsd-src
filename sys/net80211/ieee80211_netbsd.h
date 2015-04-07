@@ -549,7 +549,22 @@ TEXT_SET(ratectl##_set, alg##_modevent)
 #else	/* XXX FBSD80211 module */
 #define	IEEE80211_CRYPTO_MODULE(name, version)
 #define	IEEE80211_SCANNER_MODULE(name, version)
-#define	IEEE80211_ACL_MODULE(name, alg, version)
+#define	IEEE80211_ACL_MODULE(name, alg, version)			\
+MODULE(MODULE_CLASS_MISC, wlan_acl_##alg, NULL);			\
+static int								\
+wlan_acl_##alg##_modcmd(modcmd_t cmd, void *arg)			\
+{									\
+	switch (cmd) {							\
+	case MODULE_CMD_INIT:						\
+		ieee80211_aclator_register(&alg);			\
+		return 0;						\
+	case MODULE_CMD_FINI:						\
+		ieee80211_aclator_unregister(&alg);			\
+		return 0;						\
+	default:							\
+		return ENOTTY;						\
+	}								\
+}
 #define	IEEE80211_AUTH_MODULE(name, version)				\
 MODULE(MODULE_CLASS_MISC, wlan_auth_##name, NULL)
 #define	IEEE80211_AUTH_ALG(name, alg, v)
