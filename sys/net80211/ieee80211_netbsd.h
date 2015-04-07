@@ -547,7 +547,22 @@ alg##_modevent(int type)						\
 }									\
 TEXT_SET(ratectl##_set, alg##_modevent)
 #else	/* XXX FBSD80211 module */
-#define	IEEE80211_CRYPTO_MODULE(name, version)
+#define	IEEE80211_CRYPTO_MODULE(name, version)				\
+MODULE(MODULE_CLASS_MISC, wlan_crypto_##name, NULL);			\
+static int								\
+wlan_crypto_##name##_modcmd(modcmd_t cmd, void *arg)			\
+{									\
+	switch (cmd) {							\
+	case MODULE_CMD_INIT:						\
+		ieee80211_crypto_register(&name);			\
+		return 0;						\
+	case MODULE_CMD_FINI:						\
+		ieee80211_crypto_unregister(&name);			\
+		return 0;						\
+	default:							\
+		return ENOTTY;						\
+	}								\
+}
 #define	IEEE80211_SCANNER_MODULE(name, version)				\
 MODULE(MODULE_CLASS_MISC, wlan_scanner_##name, NULL)
 #define	IEEE80211_SCANNER_ALG(name, alg, v)
