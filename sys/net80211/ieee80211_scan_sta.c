@@ -1480,9 +1480,7 @@ static const struct ieee80211_scanner sta_default = {
 	.scan_assoc_fail	= sta_assoc_fail,
 	.scan_assoc_success	= sta_assoc_success,
 };
-#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_SCANNER_ALG(sta, IEEE80211_M_STA, sta_default);
-#endif
 
 /*
  * Adhoc mode-specific support.
@@ -1711,10 +1709,8 @@ static const struct ieee80211_scanner adhoc_default = {
 	.scan_assoc_fail	= sta_assoc_fail,
 	.scan_assoc_success	= sta_assoc_success,
 };
-#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_SCANNER_ALG(ibss, IEEE80211_M_IBSS, adhoc_default);
 IEEE80211_SCANNER_ALG(ahdemo, IEEE80211_M_AHDEMO, adhoc_default);
-#endif
 
 static void
 ap_force_promisc(struct ieee80211com *ic)
@@ -1866,9 +1862,7 @@ static const struct ieee80211_scanner ap_default = {
 	.scan_assoc_success	= sta_assoc_success,
 	.scan_assoc_fail	= sta_assoc_fail,
 };
-#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_SCANNER_ALG(ap, IEEE80211_M_HOSTAP, ap_default);
-#endif
 
 #ifdef IEEE80211_SUPPORT_MESH
 /*
@@ -1971,7 +1965,35 @@ static const struct ieee80211_scanner mesh_default = {
 	.scan_assoc_fail	= sta_assoc_fail,
 	.scan_assoc_success	= sta_assoc_success,
 };
-#ifdef notyet	/* XXX FBSD80211 module */
 IEEE80211_SCANNER_ALG(mesh, IEEE80211_M_MBSS, mesh_default);
-#endif
 #endif /* IEEE80211_SUPPORT_MESH */
+
+#ifdef __NetBSD__
+static int
+wlan_scanner_sta_modcmd(modcmd_t cmd, void *arg)
+{
+	switch (cmd) {
+	case MODULE_CMD_INIT:
+		ieee80211_scanner_register(IEEE80211_M_STA, &sta_default);
+		ieee80211_scanner_register(IEEE80211_M_IBSS, &adhoc_default);
+		ieee80211_scanner_register(IEEE80211_M_AHDEMO, &adhoc_default);
+		ieee80211_scanner_register(IEEE80211_M_HOSTAP, &ap_default);
+#ifdef IEEE80211_SUPPORT_MESH
+		ieee80211_scanner_register(IEEE80211_M_MBSS, &mesh_default);
+#endif /* IEEE80211_SUPPORT_MESH */
+		return 0;
+	case MODULE_CMD_FINI:
+		ieee80211_scanner_unregister(IEEE80211_M_STA, &sta_default);
+		ieee80211_scanner_unregister(IEEE80211_M_IBSS, &adhoc_default);
+		ieee80211_scanner_unregister(IEEE80211_M_AHDEMO,
+		    &adhoc_default);
+		ieee80211_scanner_unregister(IEEE80211_M_HOSTAP, &ap_default);
+#ifdef IEEE80211_SUPPORT_MESH
+		ieee80211_scanner_unregister(IEEE80211_M_MBSS, &mesh_default);
+#endif /* IEEE80211_SUPPORT_MESH */
+		return 0;
+	default:
+		return ENOTTY;
+	}
+}
+#endif	/* __NetBSD__ */

@@ -548,7 +548,9 @@ alg##_modevent(int type)						\
 TEXT_SET(ratectl##_set, alg##_modevent)
 #else	/* XXX FBSD80211 module */
 #define	IEEE80211_CRYPTO_MODULE(name, version)
-#define	IEEE80211_SCANNER_MODULE(name, version)
+#define	IEEE80211_SCANNER_MODULE(name, version)				\
+MODULE(MODULE_CLASS_MISC, wlan_scanner_##name, NULL)
+#define	IEEE80211_SCANNER_ALG(name, alg, v)
 #define	IEEE80211_ACL_MODULE(name, alg, version)			\
 MODULE(MODULE_CLASS_MISC, wlan_acl_##alg, NULL);			\
 static int								\
