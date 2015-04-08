@@ -186,9 +186,41 @@ setwlanmode(prop_dictionary_t env, prop_dictionary_t oenv)
 	return 0;
 }
 
+static const char *
+wlan_get_opmode_name(int opmode)
+{
+	static const char *opmode_name[IEEE80211_OPMODE_MAX] = {
+		"ibss",		/* IEEE80211_M_IBSS */
+		"sta",		/* IEEE80211_M_STA */
+		"wds",		/* IEEE80211_M_WDS */
+		"ahdemo",	/* IEEE80211_M_AHDEMO */
+		"hostap",	/* IEEE80211_M_HOSTAP */
+		"monitor",	/* IEEE80211_M_MONITOR */
+		"mbss"		/* IEEE80211_M_MBSS */
+	};
+	if ((size_t)opmode < __arraycount(opmode_name))
+		return opmode_name[opmode];
+	return "unknown";
+}
+
 static void
 wlan_status(prop_dictionary_t env, prop_dictionary_t oenv)
 {
+	struct ieee80211req ireq;
+	struct ieee80211req_wlan_dev_opmode wdo;
+
+	if (checkifname(env))
+		return;
+
+	memset(&ireq, 0, sizeof(ireq));
+	ireq.i_type = IEEE80211_IOC_WLAN_DEV_OPMODE;
+	ireq.i_len = sizeof(wdo);
+	ireq.i_data = &wdo;
+	if (direct_ioctl(env, SIOCG80211, &ireq) == -1)
+		;
+	else
+		printf("\twlandev %s, wlanmode %s\n", wdo.wdo_name,
+		    wlan_get_opmode_name(wdo.wdo_opmode));
 }
 
 static void

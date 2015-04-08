@@ -1917,6 +1917,20 @@ ieee80211_ioctl_get80211(struct ieee80211vap *vap, u_long cmd,
 			ireq->i_val =
 			    (vap->iv_flags_ht & IEEE80211_FHT_RIFS) != 0;
 		break;
+#ifdef __NetBSD__
+	case IEEE80211_IOC_WLAN_DEV_OPMODE:
+		{
+			struct ieee80211req_wlan_dev_opmode wdo;
+			if (ireq->i_len != sizeof(wdo))
+				return EINVAL;
+			memset(&wdo, 0, sizeof(wdo));
+			strlcpy(wdo.wdo_name, vap->iv_ic->ic_ifp->if_xname,
+			    sizeof(vap->iv_ic->ic_ifp->if_xname));
+			wdo.wdo_opmode = vap->iv_opmode;
+			error = copyout(&wdo, ireq->i_data, sizeof(wdo));
+		}
+		break;
+#endif	/* __NetBSD__ */
 	default:
 #ifdef notyet	/* XXX FBSD80211 ioctl */
 		error = ieee80211_ioctl_getdefault(vap, ireq);
