@@ -743,8 +743,8 @@ struct ieee80211req {
 #ifdef __NetBSD__
 #define	SIOCS80211		 _IOW('i', 244, struct ieee80211req)
 #define	SIOCG80211		_IOWR('i', 245, struct ieee80211req)
-#define	SIOCG80211STATS		_IOWR('i', 248, struct ifreq)	/* XXX FBSD80211 new stat struct ioctl#? */
-#define	SIOCG80211ZSTATS	_IOWR('i', 249, struct ifreq)	/* XXX FBSD80211 new stat struct ioctl#? */
+#define	SIOCG80211STATS		_IOWR('i', 251, struct ifreq)	/* XXX FBSD80211 new stat struct ioctl#? */
+#define	SIOCG80211ZSTATS	_IOWR('i', 252, struct ifreq)	/* XXX FBSD80211 new stat struct ioctl#? */
 #ifdef COMPAT_20
 #define	OOSIOCG80211STATS	_IOWR('i', 242, struct ifreq)
 #define	OOSIOCG80211ZSTATS	_IOWR('i', 243, struct ifreq)
