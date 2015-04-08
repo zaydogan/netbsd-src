@@ -167,20 +167,25 @@ setwlanmode(prop_dictionary_t env, prop_dictionary_t oenv)
 	if (getargstr(env, "wlanmode", mode, sizeof(mode)) == -1)
 		errx(EXIT_FAILURE, "%s: wlanmode too long", __func__);
 
-	wlan_mode = get_media_options(IFM_IEEE80211, mode, &invalid);
-	switch (wlan_mode) {
-	case IFM_IEEE80211_HOSTAP:
-		break;
+	if (strcmp(mode, "sta") == 0)
+		wlan_mode = 0;
+	else {
+		wlan_mode = get_media_options(IFM_IEEE80211, mode, &invalid);
+		switch (wlan_mode) {
+		case IFM_IEEE80211_HOSTAP:
+			break;
 
-	case IFM_IEEE80211_ADHOC:
-	case IFM_IEEE80211_MONITOR:
-	case IFM_IEEE80211_TURBO:
-	case IFM_IEEE80211_IBSS:
-	case IFM_IEEE80211_WDS:
-	case IFM_IEEE80211_MBSS:
-	default:
-		errx(EXIT_FAILURE, "invalid value of wlanmode (%s)", mode);
-		break;
+		case IFM_IEEE80211_ADHOC:
+		case IFM_IEEE80211_MONITOR:
+		case IFM_IEEE80211_TURBO:
+		case IFM_IEEE80211_IBSS:
+		case IFM_IEEE80211_WDS:
+		case IFM_IEEE80211_MBSS:
+		default:
+			errx(EXIT_FAILURE, "invalid value of wlanmode (%s)",
+			    mode);
+			break;
+		}
 	}
 
 	return 0;
