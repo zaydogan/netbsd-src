@@ -65,8 +65,19 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_ioctl.c,v 1.59 2014/01/25 00:59:44 christo
 #include <net80211/ieee80211_regdomain.h>
 #include <net80211/ieee80211_input.h>
 
-#define	IS_UP_AUTO(_vap) \
-	(IFNET_IS_UP_RUNNING((_vap)->iv_ifp) && \
+#include <dev/ic/wi_ieee.h>
+
+#if defined(COMPAT_09) || defined(COMPAT_10) || defined(COMPAT_11) || \
+    defined(COMPAT_12) || defined(COMPAT_13) || defined(COMPAT_14) || \
+    defined(COMPAT_15) || defined(COMPAT_16) || defined(COMPAT_20) || \
+    defined(COMPAT_30) || defined(COMPAT_40)
+#include <compat/sys/sockio.h>
+#endif
+
+#define	IS_UP(_vap)	IFNET_IS_UP_RUNNING((_vap)->iv_ifp)
+
+#define	IS_UP_AUTO(_vap)						\
+	(IFNET_IS_UP_RUNNING((_vap)->iv_ifp) &&				\
 	 (_vap)->iv_roaming == IEEE80211_ROAMING_AUTO)
 
 static const uint8_t zerobssid[IEEE80211_ADDR_LEN];
@@ -76,6 +87,758 @@ static struct ieee80211_channel *findchannel(struct ieee80211com *,
 #endif /* __FreeBSD__ || COMPAT_FREEBSD_NET80211 */
 static int ieee80211_scanreq(struct ieee80211vap *,
 		struct ieee80211_scan_req *);
+static int checkrate(const struct ieee80211_rateset *, int);
+static int checkmcs(int);
+
+/*
+ * XXX
+ * Wireless LAN specific configuration interface, which is compatible
+ * with wicontrol(8).
+ */
+
+struct wi_read_ap_args {
+	int	i;		/* result count */
+	struct wi_apinfo *ap;	/* current entry in result buffer */
+	void *	max;		/* result buffer bound */
+};
+
+static void
+wi_read_ap_result(void *arg, struct ieee80211_node *ni)
+{
+	struct ieee80211vap *vap = ni->ni_vap;
+	struct ieee80211com *ic = vap->iv_ic;
+	struct wi_read_ap_args *sa = arg;
+	struct wi_apinfo *ap = sa->ap;
+	struct ieee80211_rateset *rs;
+	int j;
+
+	if ((void *)(ap + 1) > sa->max)
+		return;
+	memset(ap, 0, sizeof(struct wi_apinfo));
+	if (vap->iv_opmode == IEEE80211_M_HOSTAP) {
+		IEEE80211_ADDR_COPY(ap->bssid, ni->ni_macaddr);
+		ap->namelen = vap->iv_des_ssid[0].len;
+		if (vap->iv_des_ssid[0].len)
+			memcpy(ap->name, vap->iv_des_ssid[0].ssid,
+			    vap->iv_des_ssid[0].len);
+	} else {
+		IEEE80211_ADDR_COPY(ap->bssid, ni->ni_bssid);
+		ap->namelen = ni->ni_esslen;
+		if (ni->ni_esslen)
+			memcpy(ap->name, ni->ni_essid,
+			    ni->ni_esslen);
+	}
+	ap->channel = ieee80211_chan2ieee(ic, ni->ni_chan);
+	ap->signal = ic->ic_node_getrssi(ni);
+	ap->capinfo = ni->ni_capinfo;
+	ap->interval = ni->ni_intval;
+	rs = &ni->ni_rates;
+	for (j = 0; j < rs->rs_nrates; j++) {
+		if (rs->rs_rates[j] & IEEE80211_RATE_BASIC) {
+			ap->rate = (rs->rs_rates[j] &
+			    IEEE80211_RATE_VAL) * 5; /* XXX */
+		}
+	}
+	sa->i++;
+	sa->ap++;
+}
+
+struct wi_read_prism2_args {
+	int	i;		/* result count */
+	struct wi_scan_res *res;/* current entry in result buffer */
+	void *	max;		/* result buffer bound */
+};
+
+static __noinline int
+ieee80211_cfgget(struct ieee80211vap *vap, u_long cmd, void *data)
+{
+	struct ieee80211com *ic = vap->iv_ic;
+	struct ifnet *ifp = vap->iv_ifp;
+	int i, j, error;
+	struct ifreq *ifr = (struct ifreq *)data;
+	struct wi_req *wreq;
+	struct wi_ltv_keys *keys;
+	enum ieee80211_phymode mode;
+	uint8_t rate;
+
+	wreq = malloc(sizeof(*wreq), M_TEMP, M_WAITOK);
+	error = copyin(ifr->ifr_data, wreq, sizeof(*wreq));
+	if (error)
+		goto out;
+	wreq->wi_len = 0;
+	switch (wreq->wi_type) {
+	case WI_RID_SERIALNO:
+	case WI_RID_STA_IDENTITY:
+		/* nothing appropriate */
+		break;
+	case WI_RID_NODENAME:
+		strlcpy((char *)&wreq->wi_val[1], hostname,
+		    sizeof(wreq->wi_val) - sizeof(wreq->wi_val[0]));
+		wreq->wi_val[0] = htole16(strlen(hostname));
+		wreq->wi_len = (1 + strlen(hostname) + 1) / 2;
+		break;
+	case WI_RID_CURRENT_SSID:
+		if (vap->iv_state != IEEE80211_S_RUN) {
+			wreq->wi_val[0] = 0;
+			wreq->wi_len = 1;
+			break;
+		}
+		wreq->wi_val[0] = htole16(vap->iv_bss->ni_esslen);
+		memcpy(&wreq->wi_val[1], vap->iv_bss->ni_essid,
+		    vap->iv_bss->ni_esslen);
+		wreq->wi_len = (1 + vap->iv_bss->ni_esslen + 1) / 2;
+		break;
+	case WI_RID_OWN_SSID:
+	case WI_RID_DESIRED_SSID:
+		wreq->wi_val[0] = htole16(vap->iv_des_ssid[0].len);
+		memcpy(&wreq->wi_val[1], vap->iv_des_ssid[0].ssid,
+		    vap->iv_des_ssid[0].len);
+		wreq->wi_len = (1 + vap->iv_des_ssid[0].len + 1) / 2;
+		break;
+	case WI_RID_CURRENT_BSSID:
+		if (vap->iv_state == IEEE80211_S_RUN)
+			IEEE80211_ADDR_COPY(wreq->wi_val,
+			    vap->iv_bss->ni_bssid);
+		else
+			memset(wreq->wi_val, 0, IEEE80211_ADDR_LEN);
+		wreq->wi_len = IEEE80211_ADDR_LEN / 2;
+		break;
+	case WI_RID_CHANNEL_LIST:
+		memset(wreq->wi_val, 0, sizeof(wreq->wi_val));
+		/*
+		 * Since channel 0 is not available for DS, channel 1
+		 * is assigned to LSB on WaveLAN.
+		 */
+		if (ic->ic_phytype == IEEE80211_T_DS)
+			i = 1;
+		else
+			i = 0;
+		for (j = 0; i <= IEEE80211_CHAN_MAX; i++, j++)
+			if (isset(ic->ic_chan_active, i)) {
+				setbit((u_int8_t *)wreq->wi_val, j);
+				wreq->wi_len = j / 16 + 1;
+			}
+		break;
+	case WI_RID_OWN_CHNL:
+		wreq->wi_val[0] = htole16(
+			ieee80211_chan2ieee(ic, ic->ic_bsschan));
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_CURRENT_CHAN:
+		wreq->wi_val[0] = htole16(
+			ieee80211_chan2ieee(ic, ic->ic_curchan));
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_COMMS_QUALITY:
+		wreq->wi_val[0] = 0;				/* quality */
+		wreq->wi_val[1] = htole16(ic->ic_node_getrssi(vap->iv_bss));
+		wreq->wi_val[2] = 0;				/* noise */
+		wreq->wi_len = 3;
+		break;
+	case WI_RID_PROMISC:
+		wreq->wi_val[0] = htole16((ifp->if_flags & IFF_PROMISC) ? 1 : 0);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_PORTTYPE:
+		wreq->wi_val[0] = htole16(vap->iv_opmode);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_MAC_NODE:
+		IEEE80211_ADDR_COPY(wreq->wi_val, CLLADDR(ifp->if_sadl));
+		wreq->wi_len = IEEE80211_ADDR_LEN / 2;
+		break;
+	case WI_RID_TX_RATE:
+		mode = ieee80211_chan2mode(ic->ic_curchan);
+		rate = vap->iv_txparms[mode].ucastrate;
+		if (rate == IEEE80211_FIXED_RATE_NONE) {
+			wreq->wi_val[0] = 0;	/* auto */
+		} else {
+			wreq->wi_val[0] = htole16((rate & IEEE80211_RATE_VAL) / 2);
+		}
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_CUR_TX_RATE:
+		wreq->wi_val[0] = htole16(
+		    (vap->iv_bss->ni_rates.rs_rates[vap->iv_bss->ni_txrate] &
+		    IEEE80211_RATE_VAL) / 2);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_FRAG_THRESH:
+		wreq->wi_val[0] = htole16(vap->iv_fragthreshold);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_RTS_THRESH:
+		wreq->wi_val[0] = htole16(vap->iv_rtsthreshold);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_CREATE_IBSS:
+		wreq->wi_val[0] =
+		    htole16((ic->ic_flags & IEEE80211_F_IBSSON) ? 1 : 0);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_MICROWAVE_OVEN:
+		wreq->wi_val[0] = 0;	/* no ... not supported */
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_ROAMING_MODE:
+		wreq->wi_val[0] = htole16(vap->iv_roaming);	/* XXX map */
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_SYSTEM_SCALE:
+		wreq->wi_val[0] = htole16(1);	/* low density ... not supp */
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_PM_ENABLED:
+		wreq->wi_val[0] =
+		    htole16((vap->iv_flags & IEEE80211_F_PMGTON) ? 1 : 0);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_MAX_SLEEP:
+		wreq->wi_val[0] = htole16(ic->ic_lintval);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_CUR_BEACON_INT:
+		wreq->wi_val[0] = htole16(vap->iv_bss->ni_intval);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_WEP_AVAIL:
+		wreq->wi_val[0] = htole16(1);	/* always available */
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_CNFAUTHMODE:
+		wreq->wi_val[0] = htole16(1);	/* TODO: open system only */
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_ENCRYPTION:
+		wreq->wi_val[0] =
+		    htole16((vap->iv_flags & IEEE80211_F_PRIVACY) ? 1 : 0);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_TX_CRYPT_KEY:
+		wreq->wi_val[0] = htole16(vap->iv_def_txkey);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_DEFLT_CRYPT_KEYS:
+		keys = (struct wi_ltv_keys *)wreq;
+		/* do not show keys to non-root user */
+		error = kauth_authorize_network(curlwp->l_cred,
+		    KAUTH_NETWORK_INTERFACE,
+		    KAUTH_REQ_NETWORK_INTERFACE_GETPRIV, ifp,
+		    NULL, NULL);
+		if (error) {
+			memset(keys, 0, sizeof(*keys));
+			error = 0;
+			break;
+		}
+		for (i = 0; i < IEEE80211_WEP_NKID; i++) {
+			keys->wi_keys[i].wi_keylen =
+			    htole16(vap->iv_nw_keys[i].wk_keylen);
+			memcpy(keys->wi_keys[i].wi_keydat,
+			    vap->iv_nw_keys[i].wk_key,
+			    vap->iv_nw_keys[i].wk_keylen);
+		}
+		wreq->wi_len = sizeof(*keys) / 2;
+		break;
+	case WI_RID_MAX_DATALEN:
+		wreq->wi_val[0] = htole16(vap->iv_fragthreshold);
+		wreq->wi_len = 1;
+		break;
+	case WI_RID_DBM_ADJUST:
+		/* not supported, we just pass rssi value from driver. */
+		break;
+	case WI_RID_IFACE_STATS:
+		/* XXX: should be implemented in lower drivers */
+		break;
+	case WI_RID_READ_APS:
+		/*
+		 * Don't return results until active scan completes.
+		 */
+		if ((ic->ic_flags & (IEEE80211_F_SCAN|IEEE80211_F_ASCAN)) == 0) {
+			struct wi_read_ap_args args;
+
+			args.i = 0;
+			args.ap = (void *)((char *)wreq->wi_val + sizeof(i));
+			args.max = (void *)(wreq + 1);
+			ieee80211_iterate_nodes(&ic->ic_sta,
+				wi_read_ap_result, &args);
+			memcpy(wreq->wi_val, &args.i, sizeof(args.i));
+			wreq->wi_len = (sizeof(int) +
+				sizeof(struct wi_apinfo) * args.i) / 2;
+		} else
+			error = EINPROGRESS;
+		break;
+#if 0
+	case WI_RID_SCAN_RES:			/* compatibility interface */
+		if ((ic->ic_flags & (IEEE80211_F_SCAN|IEEE80211_F_ASCAN)) == 0) {
+			struct wi_read_prism2_args args;
+			struct wi_scan_p2_hdr *p2;
+
+			/* NB: use Prism2 format so we can include rate info */
+			p2 = (struct wi_scan_p2_hdr *)wreq->wi_val;
+			args.i = 0;
+			args.res = (void *)&p2[1];
+			args.max = (void *)(wreq + 1);
+			ieee80211_iterate_nodes(&ic->ic_sta,
+				wi_read_prism2_result, &args);
+			p2->wi_rsvd = 0;
+			p2->wi_reason = args.i;
+			wreq->wi_len = (sizeof(*p2) +
+				sizeof(struct wi_scan_res) * args.i) / 2;
+		} else
+			error = EINPROGRESS;
+		break;
+	case WI_RID_READ_CACHE: {
+		struct wi_read_sigcache_args args;
+		args.i = 0;
+		args.wsc = (struct wi_sigcache *) wreq->wi_val;
+		args.max = (void *)(wreq + 1);
+		ieee80211_iterate_nodes(&ic->ic_sta, wi_read_sigcache, &args);
+		wreq->wi_len = sizeof(struct wi_sigcache) * args.i / 2;
+		break;
+	}
+#endif
+	default:
+		error = EINVAL;
+		break;
+	}
+	if (error == 0) {
+		wreq->wi_len++;
+		error = copyout(wreq, ifr->ifr_data, sizeof(*wreq));
+	}
+out:
+	free(wreq, M_TEMP);
+	return error;
+}
+
+static int
+findrate(struct ieee80211com *ic, enum ieee80211_phymode mode, int rate)
+{
+	const struct ieee80211_rateset *rs;
+	int is11n;
+
+	rs = &ic->ic_sup_rates[mode];	/* NB: 11n maps to legacy */
+	is11n = (mode == IEEE80211_MODE_11NA ||
+		 mode == IEEE80211_MODE_11NG);
+	if (!checkrate(rs, rate) &&
+	    (!is11n || !checkmcs(rate)))
+		return -1;
+	return 0;
+}
+
+/*
+ * Prepare to do a user-initiated scan for AP's.  If no
+ * current/default channel is setup or the current channel
+ * is invalid then pick the first available channel from
+ * the active list as the place to start the scan.
+ */
+static int
+ieee80211_setupscan(struct ieee80211vap *vap, const uint8_t chanlist[])
+{
+	struct ieee80211com *ic = vap->iv_ic;
+
+	/*
+	 * XXX don't permit a scan to be started unless we
+	 * know the device is ready.  For the moment this means
+	 * the device is marked up as this is the required to
+	 * initialize the hardware.  It would be better to permit
+	 * scanning prior to being up but that'll require some
+	 * changes to the infrastructure.
+	 */
+	if (!IS_UP(vap))
+		return EINVAL;
+
+	memcpy(ic->ic_chan_active, chanlist, sizeof(ic->ic_chan_active));
+	return 0;
+}
+
+static __noinline int
+ieee80211_cfgset(struct ieee80211vap *vap, u_long cmd, void *data)
+{
+	struct ieee80211com *ic = vap->iv_ic;
+	struct ifnet *ifp = vap->iv_ifp;
+	int i, j, len, error, rate;
+	struct ifreq *ifr = (struct ifreq *)data;
+	struct wi_ltv_keys *keys;
+	struct wi_req *wreq;
+	uint8_t chanlist[IEEE80211_CHAN_BYTES];
+	enum ieee80211_phymode mode;
+
+	wreq = malloc(sizeof(*wreq), M_TEMP, M_WAITOK);
+	error = copyin(ifr->ifr_data, wreq, sizeof(*wreq));
+	if (error)
+		goto out;
+	len = wreq->wi_len ? (wreq->wi_len - 1) * 2 : 0;
+	switch (wreq->wi_type) {
+	case WI_RID_SERIALNO:
+	case WI_RID_NODENAME:
+	case WI_RID_CURRENT_SSID:
+		error = EPERM;
+		goto out;
+	case WI_RID_OWN_SSID:
+	case WI_RID_DESIRED_SSID:
+		if (le16toh(wreq->wi_val[0]) * 2 > len ||
+		    le16toh(wreq->wi_val[0]) > IEEE80211_NWID_LEN) {
+			error = ENOSPC;
+			break;
+		}
+		memset(vap->iv_des_ssid[0].ssid, 0,
+		    sizeof(vap->iv_des_ssid[0].ssid));
+		vap->iv_des_ssid[0].len = le16toh(wreq->wi_val[0]) * 2;
+		memcpy(vap->iv_des_ssid[0].ssid, &wreq->wi_val[1],
+		    vap->iv_des_ssid[0].len);
+		error = ENETRESET;
+		break;
+	case WI_RID_CURRENT_BSSID:
+		error = EPERM;
+		goto out;
+	case WI_RID_OWN_CHNL:
+		if (len != 2)
+			goto invalid;
+		i = le16toh(wreq->wi_val[0]);
+		if (i < 0 ||
+		    i > IEEE80211_CHAN_MAX ||
+		    isclr(ic->ic_chan_active, i))
+			goto invalid;
+		ic->ic_bsschan = &ic->ic_channels[i];
+		if (vap->iv_opmode == IEEE80211_M_MONITOR)
+			error = IS_UP(vap) ?
+			    vap->iv_reset(vap, wreq->wi_type) : 0;
+		else
+			error = ENETRESET;
+		break;
+	case WI_RID_CURRENT_CHAN:
+	case WI_RID_COMMS_QUALITY:
+		error = EPERM;
+		goto out;
+	case WI_RID_PROMISC:
+		if (len != 2)
+			goto invalid;
+		if (ifp->if_flags & IFF_PROMISC) {
+			if (wreq->wi_val[0] == 0) {
+				ifp->if_flags &= ~IFF_PROMISC;
+				error = ENETRESET;
+			}
+		} else {
+			if (wreq->wi_val[0] != 0) {
+				ifp->if_flags |= IFF_PROMISC;
+				error = ENETRESET;
+			}
+		}
+		break;
+	case WI_RID_PORTTYPE:
+		if (len != 2)
+			goto invalid;
+		switch (le16toh(wreq->wi_val[0])) {
+		case IEEE80211_M_STA:
+			break;
+		case IEEE80211_M_IBSS:
+			if (!(ic->ic_caps & IEEE80211_C_IBSS))
+				goto invalid;
+			break;
+		case IEEE80211_M_AHDEMO:
+			if (ic->ic_phytype != IEEE80211_T_DS ||
+			    !(ic->ic_caps & IEEE80211_C_AHDEMO))
+				goto invalid;
+			break;
+		case IEEE80211_M_HOSTAP:
+			if (!(ic->ic_caps & IEEE80211_C_HOSTAP))
+				goto invalid;
+			break;
+		default:
+			goto invalid;
+		}
+		if (le16toh(wreq->wi_val[0]) != vap->iv_opmode) {
+			vap->iv_opmode = le16toh(wreq->wi_val[0]);
+			error = IS_UP(vap) ?
+			    vap->iv_reset(vap, wreq->wi_type) : 0;
+		}
+		break;
+#if 0
+	case WI_RID_MAC_NODE:
+		if (len != IEEE80211_ADDR_LEN)
+			goto invalid;
+		IEEE80211_ADDR_COPY(LLADDR(ifp->if_sadl), wreq->wi_val);
+		/* if_init will copy lladdr into ic_myaddr */
+		error = ENETRESET;
+		break;
+#endif
+	case WI_RID_TX_RATE:
+		if (len != 2)
+			goto invalid;
+		mode = ieee80211_chan2mode(ic->ic_curchan);
+		if (wreq->wi_val[0] == 0) {
+			/* auto */
+			vap->iv_txparms[mode].ucastrate = IEEE80211_FIXED_RATE_NONE;
+			break;
+		}
+		rate = 2 * le16toh(wreq->wi_val[0]);
+		if (ic->ic_curmode == IEEE80211_MODE_AUTO) {
+			/*
+			 * In autoselect mode search for the rate.  We take
+			 * the first instance which may not be right, but we
+			 * are limited by the interface.  Note that we also
+			 * lock the mode to insure the rate is meaningful
+			 * when it is used.
+			 */
+			for (mode = IEEE80211_MODE_11A;
+			     mode < IEEE80211_MODE_MAX; mode++) {
+				if (isclr(ic->ic_modecaps, mode))
+					continue;
+				i = findrate(ic, mode, rate);
+				if (i != -1) {
+					/* lock mode too */
+					ic->ic_curmode = mode;
+					goto setrate;
+				}
+			}
+		} else {
+			i = findrate(ic, ic->ic_curmode, rate);
+			if (i != -1)
+				goto setrate;
+		}
+		goto invalid;
+	setrate:
+		vap->iv_txparms[mode].ucastrate = rate;	/* XXX FBSD80211 MCS? */
+		error = IS_UP(vap) ?
+		    vap->iv_reset(vap, wreq->wi_type) : 0;
+		break;
+	case WI_RID_CUR_TX_RATE:
+		error = EPERM;
+		goto out;
+	case WI_RID_FRAG_THRESH:
+		if (len != 2)
+			goto invalid;
+		vap->iv_fragthreshold = le16toh(wreq->wi_val[0]);
+		error = ENETRESET;
+		break;
+	case WI_RID_RTS_THRESH:
+		if (len != 2)
+			goto invalid;
+		vap->iv_rtsthreshold = le16toh(wreq->wi_val[0]);
+		error = ENETRESET;
+		break;
+	case WI_RID_CREATE_IBSS:
+		if (len != 2)
+			goto invalid;
+		if (wreq->wi_val[0] != 0) {
+			if ((ic->ic_caps & IEEE80211_C_IBSS) == 0)
+				goto invalid;
+			if ((ic->ic_flags & IEEE80211_F_IBSSON) == 0) {
+				ic->ic_flags |= IEEE80211_F_IBSSON;
+				if (vap->iv_opmode == IEEE80211_M_IBSS &&
+				    vap->iv_state == IEEE80211_S_SCAN)
+					error = IS_UP_AUTO(vap) ? ENETRESET : 0;
+			}
+		} else {
+			if (ic->ic_flags & IEEE80211_F_IBSSON) {
+				ic->ic_flags &= ~IEEE80211_F_IBSSON;
+				if (ic->ic_flags & IEEE80211_F_SIBSS) {
+					ic->ic_flags &= ~IEEE80211_F_SIBSS;
+					error = IS_UP_AUTO(vap) ? ENETRESET : 0;
+				}
+			}
+		}
+		break;
+	case WI_RID_MICROWAVE_OVEN:
+		if (len != 2)
+			goto invalid;
+		if (wreq->wi_val[0] != 0)
+			goto invalid;		/* not supported */
+		break;
+	case WI_RID_ROAMING_MODE:
+		if (len != 2)
+			goto invalid;
+		i = le16toh(wreq->wi_val[0]);
+		if (i > IEEE80211_ROAMING_MANUAL)
+			goto invalid;		/* not supported */
+		vap->iv_roaming = i;
+		break;
+	case WI_RID_SYSTEM_SCALE:
+		if (len != 2)
+			goto invalid;
+		if (le16toh(wreq->wi_val[0]) != 1)
+			goto invalid;		/* not supported */
+		break;
+	case WI_RID_PM_ENABLED:
+		if (len != 2)
+			goto invalid;
+		if (wreq->wi_val[0] != 0) {
+			if ((ic->ic_caps & IEEE80211_C_PMGT) == 0)
+				goto invalid;
+			if ((ic->ic_flags & IEEE80211_F_PMGTON) == 0) {
+				ic->ic_flags |= IEEE80211_F_PMGTON;
+				error = IS_UP(vap) ?
+				    vap->iv_reset(vap, wreq->wi_type) : 0;
+			}
+		} else {
+			if (ic->ic_flags & IEEE80211_F_PMGTON) {
+				ic->ic_flags &= ~IEEE80211_F_PMGTON;
+				error = IS_UP(vap) ?
+				    vap->iv_reset(vap, wreq->wi_type) : 0;
+			}
+		}
+		break;
+	case WI_RID_MAX_SLEEP:
+		if (len != 2)
+			goto invalid;
+		ic->ic_lintval = le16toh(wreq->wi_val[0]);
+		if (ic->ic_flags & IEEE80211_F_PMGTON)
+			error = IS_UP(vap) ?
+			    vap->iv_reset(vap, wreq->wi_type) : 0;
+		break;
+	case WI_RID_CUR_BEACON_INT:
+	case WI_RID_WEP_AVAIL:
+		error = EPERM;
+		goto out;
+	case WI_RID_CNFAUTHMODE:
+		if (len != 2)
+			goto invalid;
+		i = le16toh(wreq->wi_val[0]);
+		if (i > IEEE80211_AUTH_WPA)
+			goto invalid;
+		vap->iv_bss->ni_authmode = i;		/* XXX ENETRESET? */
+		error = ENETRESET;
+		break;
+	case WI_RID_ENCRYPTION:
+		if (len != 2)
+			goto invalid;
+		if (wreq->wi_val[0] != 0) {
+			if ((ic->ic_flags & IEEE80211_F_PRIVACY) == 0) {
+				ic->ic_flags |= IEEE80211_F_PRIVACY;
+				error = ENETRESET;
+			}
+		} else {
+			if (ic->ic_flags & IEEE80211_F_PRIVACY) {
+				ic->ic_flags &= ~IEEE80211_F_PRIVACY;
+				error = ENETRESET;
+			}
+		}
+		break;
+	case WI_RID_TX_CRYPT_KEY:
+		if (len != 2)
+			goto invalid;
+		i = le16toh(wreq->wi_val[0]);
+		if (i >= IEEE80211_WEP_NKID)
+			goto invalid;
+		vap->iv_def_txkey = i;
+		error = IS_UP(vap) ?
+		    vap->iv_reset(vap, wreq->wi_type) : 0;
+		break;
+	case WI_RID_DEFLT_CRYPT_KEYS:
+		if (len != sizeof(struct wi_ltv_keys))
+			goto invalid;
+		keys = (struct wi_ltv_keys *)wreq;
+		for (i = 0; i < IEEE80211_WEP_NKID; i++) {
+			len = le16toh(keys->wi_keys[i].wi_keylen);
+			if (len != 0 && len < IEEE80211_WEP_KEYLEN)
+				goto invalid;
+			if (len > IEEE80211_KEYBUF_SIZE)
+				goto invalid;
+		}
+		for (i = 0; i < IEEE80211_WEP_NKID; i++) {
+			struct ieee80211_key *k = &vap->iv_nw_keys[i];
+
+			len = le16toh(keys->wi_keys[i].wi_keylen);
+			k->wk_keylen = len;
+			k->wk_flags = IEEE80211_KEY_XMIT | IEEE80211_KEY_RECV;
+			memset(k->wk_key, 0, sizeof(k->wk_key));
+			memcpy(k->wk_key, keys->wi_keys[i].wi_keydat, len);
+#if 0
+			k->wk_type = IEEE80211_CIPHER_WEP;
+#endif
+		}
+		error = ENETRESET;
+		break;
+	case WI_RID_MAX_DATALEN:
+		if (len != 2)
+			goto invalid;
+		len = le16toh(wreq->wi_val[0]);
+		if (len < 350 /* ? */ || len > IEEE80211_MAX_LEN)
+			goto invalid;
+		vap->iv_fragthreshold = len;
+		error = IS_UP(vap) ?
+		    vap->iv_reset(vap, wreq->wi_type) : 0;
+		break;
+	case WI_RID_IFACE_STATS:
+		error = EPERM;
+		break;
+	case WI_RID_SCAN_REQ:			/* XXX wicontrol */
+		if (vap->iv_opmode == IEEE80211_M_HOSTAP)
+			break;
+		error = ieee80211_setupscan(vap, ic->ic_chan_avail);
+		if (error == 0) {
+			if (vap->iv_state == IEEE80211_S_INIT)
+				ieee80211_new_state(vap, IEEE80211_S_SCAN, 0);
+			else
+				(void) ieee80211_start_scan(vap,
+					IEEE80211_SCAN_ACTIVE |
+					IEEE80211_SCAN_NOPICK |
+					IEEE80211_SCAN_ONCE,
+					IEEE80211_SCAN_FOREVER, 0, 0,
+					/* XXX use ioctl params */
+					vap->iv_des_nssid, vap->iv_des_ssid);
+		}
+		error = 0;
+		break;
+	case WI_RID_SCAN_APS:
+		if (vap->iv_opmode == IEEE80211_M_HOSTAP)
+			break;
+		len--;			/* XXX: tx rate? */
+		/* FALLTHRU */
+	case WI_RID_CHANNEL_LIST:
+		memset(chanlist, 0, sizeof(chanlist));
+		/*
+		 * Since channel 0 is not available for DS, channel 1
+		 * is assigned to LSB on WaveLAN.
+		 */
+		if (ic->ic_phytype == IEEE80211_T_DS)
+			i = 1;
+		else
+			i = 0;
+		for (j = 0; i <= IEEE80211_CHAN_MAX; i++, j++) {
+			if ((j / 8) >= len)
+				break;
+			if (isclr((u_int8_t *)wreq->wi_val, j))
+				continue;
+			if (isclr(ic->ic_chan_active, i)) {
+				if (wreq->wi_type != WI_RID_CHANNEL_LIST)
+					continue;
+				if (isclr(ic->ic_chan_avail, i)) {
+					error = EPERM;
+					goto out;
+				}
+			}
+			setbit(chanlist, i);
+		}
+		error = ieee80211_setupscan(vap, chanlist);
+		if (wreq->wi_type == WI_RID_CHANNEL_LIST) {
+			/* NB: ignore error from ieee80211_setupscan */
+			error = ENETRESET;
+		} else if (error == 0) {
+			if (vap->iv_state == IEEE80211_S_INIT)
+				ieee80211_new_state(vap, IEEE80211_S_SCAN, 0);
+			else
+				(void) ieee80211_start_scan(vap,
+					IEEE80211_SCAN_ACTIVE |
+					IEEE80211_SCAN_NOPICK |
+					IEEE80211_SCAN_ONCE,
+					IEEE80211_SCAN_FOREVER, 0, 0,
+					/* XXX use ioctl params */
+					vap->iv_des_nssid, vap->iv_des_ssid);
+		}
+		break;
+	default:
+		goto invalid;
+	}
+	if (error == ENETRESET && !IS_UP_AUTO(vap))
+		error = 0;
+out:
+	free(wreq, M_TEMP);
+	return error;
+invalid:
+	free(wreq, M_TEMP);
+	return EINVAL;
+}
 
 static __noinline int
 ieee80211_ioctl_getkey(struct ieee80211vap *vap, struct ieee80211req *ireq)
@@ -3574,8 +4337,6 @@ ieee80211_vap_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 	struct ieee80211_stats70 stats70;
 #endif /* COMPAT_70 */
 
-printf("%s: ifp=%p, cmd=%lx, data=%p, vap=%p\n", __func__, ifp, cmd, data, vap);
-
 	switch (cmd) {
 	case SIOCSIFFLAGS:
 		IEEE80211_LOCK(ic);
@@ -3839,7 +4600,7 @@ printf("%s: ifp=%p, cmd=%lx, data=%p, vap=%p\n", __func__, ifp, cmd, data, vap);
 			error = ENETRESET;
 			break;
 		default:
-			if (ic->ic_opmode == IEEE80211_M_STA) {
+			if (vap->iv_opmode == IEEE80211_M_STA) {
 				if (vap->iv_des_chan != IEEE80211_CHAN_ANYC &&
 				    vap->iv_bss->ni_chan != vap->iv_des_chan)
 					error = ENETRESET;
@@ -3869,9 +4630,8 @@ printf("%s: ifp=%p, cmd=%lx, data=%p, vap=%p\n", __func__, ifp, cmd, data, vap);
 		}
 		chanreq->i_channel = ieee80211_chan2ieee(ic, chan);
 		break;
-#ifdef notyet	/* XXX FBSD80211 wi compat */
 	case SIOCGIFGENERIC:
-		error = ieee80211_cfgget(ic, cmd, data);
+		error = ieee80211_cfgget(vap, cmd, data);
 		break;
 	case SIOCSIFGENERIC:
 		error = kauth_authorize_network(curlwp->l_cred,
@@ -3880,9 +4640,8 @@ printf("%s: ifp=%p, cmd=%lx, data=%p, vap=%p\n", __func__, ifp, cmd, data, vap);
 		    NULL);
 		if (error)
 			break;
-		error = ieee80211_cfgset(ic, cmd, data);
+		error = ieee80211_cfgset(vap, cmd, data);
 		break;
-#endif
 #ifdef COMPAT_20
 	case OOSIOCG80211STATS:
 	case OOSIOCG80211ZSTATS:
