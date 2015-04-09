@@ -1918,16 +1918,16 @@ ieee80211_ioctl_get80211(struct ieee80211vap *vap, u_long cmd,
 			    (vap->iv_flags_ht & IEEE80211_FHT_RIFS) != 0;
 		break;
 #ifdef __NetBSD__
-	case IEEE80211_IOC_WLAN_DEV_OPMODE:
+	case IEEE80211_IOC_WLAN_PARAM:
 		{
-			struct ieee80211req_wlan_dev_opmode wdo;
-			if (ireq->i_len != sizeof(wdo))
+			struct ieee80211_wlan_param_req wp;
+			if (ireq->i_len != sizeof(wp))
 				return EINVAL;
-			memset(&wdo, 0, sizeof(wdo));
-			strlcpy(wdo.wdo_name, vap->iv_ic->ic_ifp->if_xname,
+			memset(&wp, 0, sizeof(wp));
+			strlcpy(wp.wp_name, vap->iv_ic->ic_ifp->if_xname,
 			    sizeof(vap->iv_ic->ic_ifp->if_xname));
-			wdo.wdo_opmode = vap->iv_opmode;
-			error = copyout(&wdo, ireq->i_data, sizeof(wdo));
+			wp.wp_opmode = vap->iv_opmode;
+			error = copyout(&wp, ireq->i_data, sizeof(wp));
 		}
 		break;
 #endif	/* __NetBSD__ */

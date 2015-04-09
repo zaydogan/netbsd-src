@@ -717,11 +717,11 @@ struct ieee80211req_sta_vlan {
 };
 
 /*
- * Get/set wlan device and opmode.
+ * Get/set wlan interface parameters.
  */
-struct ieee80211req_wlan_dev_opmode {
-	char		wdo_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
-	int		wdo_opmode;		/* IEEE80211_M_* */
+struct ieee80211_wlan_param_req {
+	char		wp_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	int		wp_opmode;		/* IEEE80211_M_* */
 };
 
 /*
@@ -873,7 +873,6 @@ struct ieee80211req {
 #define	IEEE80211_IOC_RIFS		111	/* RIFS config (on, off) */
 #define	IEEE80211_IOC_GREENFIELD	112	/* Greenfield (on, off) */
 #define	IEEE80211_IOC_STBC		113	/* STBC Tx/RX (on, off) */
-#define	IEEE80211_IOC_WLAN_DEV_OPMODE	114	/* wlan dev and opmode */
 
 #define	IEEE80211_IOC_MESH_ID		170	/* mesh identifier */
 #define	IEEE80211_IOC_MESH_AP		171	/* accepting peerings */
@@ -902,6 +901,11 @@ struct ieee80211req {
 #define	IEEE80211_IOC_QUIET_OFFSET	207	/* Quiet Offset */
 #define	IEEE80211_IOC_QUIET_DUR		208	/* Quiet Duration */
 #define	IEEE80211_IOC_QUIET_COUNT	209	/* Quiet Count */
+
+#ifdef __NetBSD__
+#define	IEEE80211_IOC_WLAN_PARAM	0x8000	/* wlan param */
+#endif	/* __NetBSD__ */
+
 /*
  * Parameters for controlling a scan requested with
  * IEEE80211_IOC_SCAN_REQ.

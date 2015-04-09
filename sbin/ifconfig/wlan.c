@@ -123,7 +123,7 @@ checkifname(prop_dictionary_t env)
 static int
 setwlandev(prop_dictionary_t env, prop_dictionary_t oenv)
 {
-	struct ieee80211req_wlan_dev_opmode data;
+	struct ieee80211_wlan_param_req param;
 	const char *wlan_dev;
 
 	if (checkifname(env))
@@ -133,15 +133,15 @@ setwlandev(prop_dictionary_t env, prop_dictionary_t oenv)
 		errno = ENOENT;
 		return -1;
 	}
-	strlcpy(data.wdo_name, wlan_dev, sizeof(data.wdo_name));
+	strlcpy(param.wp_name, wlan_dev, sizeof(param.wp_name));
 
 	switch (wlan_mode) {
 	case 0:
-		data.wdo_opmode = IEEE80211_M_STA;
+		param.wp_opmode = IEEE80211_M_STA;
 		break;
 
 	case IFM_IEEE80211_HOSTAP:
-		data.wdo_opmode = IEEE80211_M_HOSTAP;
+		param.wp_opmode = IEEE80211_M_HOSTAP;
 		break;
 
 	default:
@@ -149,9 +149,9 @@ setwlandev(prop_dictionary_t env, prop_dictionary_t oenv)
 		break;
 	}
 
-	if (set80211(env, IEEE80211_IOC_WLAN_DEV_OPMODE, 0, sizeof(data),
-	    (void *)&data) == -1)
-		err(EXIT_FAILURE, "IEEE80211_IOC_WLAN_DEV_OPMODE");
+	if (set80211(env, IEEE80211_IOC_WLAN_PARAM, 0, sizeof(param),
+	    (void *)&param) == -1)
+		err(EXIT_FAILURE, "IEEE80211_IOC_WLAN_PARAM");
 	return 0;
 }
 
@@ -212,20 +212,20 @@ static void
 wlan_status(prop_dictionary_t env, prop_dictionary_t oenv)
 {
 	struct ieee80211req ireq;
-	struct ieee80211req_wlan_dev_opmode wdo;
+	struct ieee80211_wlan_param_req wp;
 
 	if (checkifname(env))
 		return;
 
 	memset(&ireq, 0, sizeof(ireq));
-	ireq.i_type = IEEE80211_IOC_WLAN_DEV_OPMODE;
-	ireq.i_len = sizeof(wdo);
-	ireq.i_data = &wdo;
+	ireq.i_type = IEEE80211_IOC_WLAN_PARAM;
+	ireq.i_len = sizeof(wp);
+	ireq.i_data = &wp;
 	if (direct_ioctl(env, SIOCG80211, &ireq) == -1)
 		;
 	else
-		printf("\twlandev %s, wlanmode %s\n", wdo.wdo_name,
-		    wlan_get_opmode_name(wdo.wdo_opmode));
+		printf("\twlandev %s, wlanmode %s\n", wp.wp_name,
+		    wlan_get_opmode_name(wp.wp_opmode));
 }
 
 static void

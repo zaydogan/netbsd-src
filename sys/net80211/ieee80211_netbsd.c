@@ -147,32 +147,32 @@ ieee80211_find_instance(struct ifnet *ifp)
 }
 
 static int
-wlan_set_dev_opmode(struct ifnet *ifp, struct ieee80211req_wlan_dev_opmode *wdo)
+wlan_ioctl_set_wlan_param(struct ifnet *ifp,
+    struct ieee80211_wlan_param_req *wp)
 {
 	struct ifnet *parent;
 	struct ieee80211com *ic;
 	struct ieee80211vap *vap;
 
-	parent = ifunit(wdo->wdo_name);
+	parent = ifunit(wp->wp_name);
 	if (parent == NULL)
 		return ENXIO;
 	ic = ieee80211_find_instance(parent);
 	if (ic == NULL)
 		return ENXIO;
-	if (wdo->wdo_opmode < IEEE80211_M_IBSS ||
-	    wdo->wdo_opmode > IEEE80211_M_MBSS) {
-		if_printf(ifp, "invalid opmode %d\n",
-		    wdo->wdo_opmode);
+	if (wp->wp_opmode < IEEE80211_M_IBSS ||
+	    wp->wp_opmode > IEEE80211_M_MBSS) {
+		if_printf(ifp, "invalid opmode %d\n", wp->wp_opmode);
 		return EINVAL;
 	}
-	if (!(ic->ic_caps & ieee80211_opcap[wdo->wdo_opmode])) {
+	if (!(ic->ic_caps & ieee80211_opcap[wp->wp_opmode])) {
 		if_printf(ifp, "%s mode not supported\n",
-		    ieee80211_opmode_name[wdo->wdo_opmode]);
+		    ieee80211_opmode_name[wp->wp_opmode]);
 		return EOPNOTSUPP;
 	}
 
-	vap = (*ic->ic_vap_create)(ic, ifp, wdo->wdo_opmode, 0,
-	    zerobssid, CLLADDR(parent->if_sadl));
+	vap = (*ic->ic_vap_create)(ic, ifp, wp->wp_opmode, 0, zerobssid,
+	    CLLADDR(parent->if_sadl));
 	if (vap == NULL)
 		return EINVAL;
 	return 0;
@@ -201,8 +201,8 @@ wlan_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 			break;
 		req = (struct ieee80211req *)data;
 		switch (req->i_type) {
-		case IEEE80211_IOC_WLAN_DEV_OPMODE:
-			error = wlan_set_dev_opmode(ifp, req->i_data);
+		case IEEE80211_IOC_WLAN_PARAM:
+			error = wlan_ioctl_set_wlan_param(ifp, req->i_data);
 			break;
 
 		default:
