@@ -279,13 +279,6 @@ null_update_chw(struct ieee80211com *ic)
 	if_printf(ic->ic_ifp, "%s: need callback\n", __func__);
 }
 
-static void
-taskqueue_thread_enqueue(struct work *work, void *arg)
-{
-
-	/* XXX FBSD80211 task work queue implement me!!! */
-}
-
 /*
  * Attach/setup the common net80211 state.  Called by
  * the driver on attach to prior to creating any vap's.
@@ -308,10 +301,10 @@ ieee80211_ifattach(struct ieee80211com *ic,
 	TAILQ_INIT(&ic->ic_vaps);
 
 	/* Create a taskqueue for all state changes */
-	error = workqueue_create(&ic->ic_tq, "ic_taskq",
-	    taskqueue_thread_enqueue, ic, PRI_SOFTNET, IPL_NET, WQ_MPSAFE);
-	if (error)
-		panic("workqueue_create: %s", ifp->if_xname);
+	error = ieee80211_taskqueue_create(&ic->ic_tq, "ic_taskq", PRI_NONE,
+	    IPL_NET, IEEE80211_TQ_MPSAFE);
+	if (error != 0)
+		panic("taskqueue_create: %s (errno=%d)", ifp->if_xname, error);
 	/*
 	 * Fill in 802.11 available channel set, mark all
 	 * available channels as active, and pick a default
@@ -412,7 +405,7 @@ ieee80211_ifdetach(struct ieee80211com *ic)
 	/* XXX VNET needed? */
 	ifmedia_removeall(&ic->ic_media);
 
-	workqueue_destroy(ic->ic_tq);
+	ieee80211_taskqueue_destroy(ic->ic_tq);
 	IEEE80211_TX_LOCK_DESTROY(ic);
 	IEEE80211_LOCK_DESTROY(ic);
 }

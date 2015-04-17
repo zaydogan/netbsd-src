@@ -56,6 +56,9 @@
 #include <net80211/ieee80211_proto.h>
 #include <net80211/ieee80211_radiotap.h>
 #include <net80211/ieee80211_scan.h>
+#if defined(__NetBSD__)
+#include <net80211/ieee80211_task.h>
+#endif
 
 #define	IEEE80211_TXPOWER_MAX	100	/* .5 dBm (XXX units?) */
 #define	IEEE80211_TXPOWER_MIN	0	/* kill radio */
@@ -128,13 +131,13 @@ struct ieee80211com {
 	enum ieee80211_opmode	ic_opmode;	/* operation mode */
 	struct ifmedia		ic_media;	/* interface media config */
 	struct callout		ic_inact;	/* inactivity processing */
-	struct workqueue	*ic_tq;		/* deferred state thread */
-	struct task		ic_parent_task;	/* deferred parent processing */
-	struct task		ic_promisc_task;/* deferred promisc update */
-	struct task		ic_mcast_task;	/* deferred mcast update */
-	struct task		ic_chan_task;	/* deferred channel change */
-	struct task		ic_bmiss_task;	/* deferred beacon miss hndlr */
-	struct task		ic_chw_task;	/* deferred HT CHW update */
+	struct ieee80211_taskqueue *ic_tq;	/* deferred state thread */
+	struct ieee80211_task	ic_parent_task;	/* deferred parent processing */
+	struct ieee80211_task	ic_promisc_task;/* deferred promisc update */
+	struct ieee80211_task	ic_mcast_task;	/* deferred mcast update */
+	struct ieee80211_task	ic_chan_task;	/* deferred channel change */
+	struct ieee80211_task	ic_bmiss_task;	/* deferred beacon miss hndlr */
+	struct ieee80211_task	ic_chw_task;	/* deferred HT CHW update */
 
 	uint32_t		ic_flags;	/* state flags */
 	uint32_t		ic_flags_ext;	/* extended state flags */
@@ -362,8 +365,8 @@ struct ieee80211vap {
 	enum ieee80211_state	iv_state;	/* state machine state */
 	enum ieee80211_state	iv_nstate;	/* pending state */
 	int			iv_nstate_arg;	/* pending state arg */
-	struct task		iv_nstate_task;	/* deferred state processing */
-	struct task		iv_swbmiss_task;/* deferred iv_bmiss call */
+	struct ieee80211_task	iv_nstate_task;	/* deferred state processing */
+	struct ieee80211_task	iv_swbmiss_task;/* deferred iv_bmiss call */
 	struct callout		iv_mgtsend;	/* mgmt frame response timer */
 						/* inactivity timer settings */
 	int			iv_inact_init;	/* setting for new station */
@@ -742,22 +745,18 @@ ieee80211_radiotap_active_vap(const struct ieee80211vap *vap)
  * Enqueue a task on the state thread.
  */
 static __inline void
-ieee80211_runtask(struct ieee80211com *ic, struct task *task)
+ieee80211_runtask(struct ieee80211com *ic, struct ieee80211_task *task)
 {
-	workqueue_enqueue(ic->ic_tq, &task->ta_work, NULL);
+	ieee80211_taskqueue_enqueue(ic->ic_tq, task);
 }
 
 /*
  * Wait for a queued task to complete.
  */
 static __inline void
-ieee80211_draintask(struct ieee80211com *ic, struct task *task)
+ieee80211_draintask(struct ieee80211com *ic, struct ieee80211_task *task)
 {
-#ifdef notyet	/* XXX FBSD80211 task work drain */
-	workqueue_drain(ic->ic_tq, task->ta_work);
-#else
-	printf("%s: XXX draintask()\n", __func__);
-#endif
+	ieee80211_taskqueue_drain(ic->ic_tq, task);
 }
 
 /* 

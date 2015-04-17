@@ -37,7 +37,6 @@
 #include <sys/mutex.h>
 #include <sys/rwlock.h>
 #include <sys/sysctl.h>
-#include <sys/workqueue.h>
 
 #define	IASSERT(__cond, __complaint)	 	\
 	do {				 	\
@@ -490,24 +489,6 @@ SET_DECLARE(ieee80211_ioctl_setset, ieee80211_ioctl_setfunc);
 #endif
 
 #ifdef __NetBSD__
-/*
- * FreeBSD task sim
- */
-struct task {
-	struct work	ta_work;
-	void		(*ta_func)(struct work *, void *);
-	void		*ta_context;
-};
-
-static __inline void
-TASK_INIT(struct task *task, int priority, void (*func)(struct work *, void *),
-    void *context)
-{
-
-	task->ta_func = func;
-	task->ta_context = context;
-}
-
 #define	IF_LLADDR(ifp)	((ifp)->if_sadl)
 #endif	/* __NetBSD__ */
 #endif /* _KERNEL */

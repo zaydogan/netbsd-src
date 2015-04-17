@@ -64,7 +64,7 @@ struct scan_state {
 	unsigned long	ss_chanmindwell;	/* min dwell on curchan */
 	unsigned long	ss_scanend;		/* time scan must stop */
 	u_int		ss_duration;		/* duration for next scan */
-	struct task	ss_scan_task;		/* scan execution */
+	struct ieee80211_task ss_scan_task;	/* scan execution */
 	kcondvar_t	ss_scan_cv;		/* scan signal */
 	struct callout	ss_scan_timer;		/* scan timer */
 };
@@ -101,7 +101,7 @@ struct scan_state {
 static	void scan_curchan(struct ieee80211_scan_state *, unsigned long);
 static	void scan_mindwell(struct ieee80211_scan_state *);
 static	void scan_signal(void *);
-static	void scan_task(struct work *, void *);
+static	void scan_task(void *, int);
 
 void
 ieee80211_scan_attach(struct ieee80211com *ic)
@@ -116,7 +116,7 @@ ieee80211_scan_attach(struct ieee80211com *ic)
 	}
 	callout_init(&ss->ss_scan_timer, 0);
 	cv_init(&ss->ss_scan_cv, "scan");
-	TASK_INIT(&ss->ss_scan_task, 0, scan_task, ss);
+	IEEE80211_TASK_INIT(&ss->ss_scan_task, 0, scan_task, ss);
 	ic->ic_scan = &ss->base;
 	ss->base.ss_ic = ic;
 
@@ -843,11 +843,10 @@ scan_mindwell(struct ieee80211_scan_state *ss)
 }
 
 static void
-scan_task(struct work *work, void *arg)
+scan_task(void *context, int pending)
 {
 #define	ISCAN_REP	(ISCAN_MINDWELL | ISCAN_DISCARD)
-	struct task *task = (struct task *)work;
-	struct ieee80211_scan_state *ss = task->ta_context;
+	struct ieee80211_scan_state *ss = context;
 	struct ieee80211vap *vap = ss->ss_vap;
 	struct ieee80211com *ic = ss->ss_ic;
 	struct ieee80211_channel *chan;

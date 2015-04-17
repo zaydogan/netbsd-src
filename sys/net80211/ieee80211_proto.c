@@ -107,14 +107,14 @@ const char *ieee80211_wme_acnames[] = {
 	"WME_UPSD",
 };
 
-static void beacon_miss(struct work *, void *);
-static void beacon_swmiss(struct work *, void *);
-static void parent_updown(struct work *, void *);
-static void update_mcast(struct work *, void *);
-static void update_promisc(struct work *, void *);
-static void update_channel(struct work *, void *);
-static void update_chw(struct work *, void *);
-static void ieee80211_newstate_cb(struct work *, void *);
+static void beacon_miss(void *, int);
+static void beacon_swmiss(void *, int);
+static void parent_updown(void *, int);
+static void update_mcast(void *, int);
+static void update_promisc(void *, int);
+static void update_channel(void *, int);
+static void update_chw(void *, int);
+static void ieee80211_newstate_cb(void *, int);
 
 static int
 null_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
@@ -146,12 +146,12 @@ ieee80211_proto_attach(struct ieee80211com *ic)
 	}
 	ic->ic_protmode = IEEE80211_PROT_CTSONLY;
 
-	TASK_INIT(&ic->ic_parent_task, 0, parent_updown, ifp);
-	TASK_INIT(&ic->ic_mcast_task, 0, update_mcast, ic);
-	TASK_INIT(&ic->ic_promisc_task, 0, update_promisc, ic);
-	TASK_INIT(&ic->ic_chan_task, 0, update_channel, ic);
-	TASK_INIT(&ic->ic_bmiss_task, 0, beacon_miss, ic);
-	TASK_INIT(&ic->ic_chw_task, 0, update_chw, ic);
+	IEEE80211_TASK_INIT(&ic->ic_parent_task, 0, parent_updown, ifp);
+	IEEE80211_TASK_INIT(&ic->ic_mcast_task, 0, update_mcast, ic);
+	IEEE80211_TASK_INIT(&ic->ic_promisc_task, 0, update_promisc, ic);
+	IEEE80211_TASK_INIT(&ic->ic_chan_task, 0, update_channel, ic);
+	IEEE80211_TASK_INIT(&ic->ic_bmiss_task, 0, beacon_miss, ic);
+	IEEE80211_TASK_INIT(&ic->ic_chw_task, 0, update_chw, ic);
 
 	ic->ic_wme.wme_hipri_switch_hysteresis =
 		AGGRESSIVE_MODE_SWITCH_HYSTERESIS;
@@ -203,8 +203,8 @@ ieee80211_proto_vattach(struct ieee80211vap *vap)
 	vap->iv_bmiss_max = IEEE80211_BMISS_MAX;
 	callout_init(&vap->iv_swbmiss, 0);
 	callout_init(&vap->iv_mgtsend, CALLOUT_MPSAFE);
-	TASK_INIT(&vap->iv_nstate_task, 0, ieee80211_newstate_cb, vap);
-	TASK_INIT(&vap->iv_swbmiss_task, 0, beacon_swmiss, vap);
+	IEEE80211_TASK_INIT(&vap->iv_nstate_task, 0, ieee80211_newstate_cb, vap);
+	IEEE80211_TASK_INIT(&vap->iv_swbmiss_task, 0, beacon_swmiss, vap);
 	/*
 	 * Install default tx rate handling: no fixed rate, lowest
 	 * supported rate for mgmt and multicast frames.  Default
@@ -1176,49 +1176,44 @@ ieee80211_wme_updateparams(struct ieee80211vap *vap)
 }
 
 static void
-parent_updown(struct work *work, void *arg)
+parent_updown(void *context, int pending)
 {
-	struct task *task = (struct task *)work;
-	struct ifnet *parent = task->ta_context;
+	struct ifnet *parent = context;
 
 	parent->if_ioctl(parent, SIOCSIFFLAGS, NULL);
 }
 
 static void
-update_mcast(struct work *work, void *arg)
+update_mcast(void *context, int pending)
 {
-	struct task *task = (struct task *)work;
-	struct ieee80211com *ic = task->ta_context;
+	struct ieee80211com *ic = context;
 	struct ifnet *parent = ic->ic_ifp;
 
 	ic->ic_update_mcast(parent);
 }
 
 static void
-update_promisc(struct work *work, void *arg)
+update_promisc(void *context, int pending)
 {
-	struct task *task = (struct task *)work;
-	struct ieee80211com *ic = task->ta_context;
+	struct ieee80211com *ic = context;
 	struct ifnet *parent = ic->ic_ifp;
 
 	ic->ic_update_promisc(parent);
 }
 
 static void
-update_channel(struct work *work, void *arg)
+update_channel(void *context, int pending)
 {
-	struct task *task = (struct task *)work;
-	struct ieee80211com *ic = task->ta_context;
+	struct ieee80211com *ic = context;
 
 	ic->ic_set_channel(ic);
 	ieee80211_radiotap_chan_change(ic);
 }
 
 static void
-update_chw(struct work *work, void *arg)
+update_chw(void *context, int pending)
 {
-	struct task *task = (struct task *)work;
-	struct ieee80211com *ic = task->ta_context;
+	struct ieee80211com *ic = context;
 
 	/*
 	 * XXX should we defer the channel width _config_ update until now?
@@ -1234,14 +1229,14 @@ update_chw(struct work *work, void *arg)
 void
 ieee80211_waitfor_parent(struct ieee80211com *ic)
 {
-	workqueue_block(ic->ic_tq);
+	ieee80211_taskqueue_block(ic->ic_tq);
 	ieee80211_draintask(ic, &ic->ic_parent_task);
 	ieee80211_draintask(ic, &ic->ic_mcast_task);
 	ieee80211_draintask(ic, &ic->ic_promisc_task);
 	ieee80211_draintask(ic, &ic->ic_chan_task);
 	ieee80211_draintask(ic, &ic->ic_bmiss_task);
 	ieee80211_draintask(ic, &ic->ic_chw_task);
-	workqueue_unblock(ic->ic_tq);
+	ieee80211_taskqueue_unblock(ic->ic_tq);
 }
 
 /*
@@ -1480,10 +1475,9 @@ ieee80211_beacon_miss(struct ieee80211com *ic)
 }
 
 static void
-beacon_miss(struct work *work, void *arg)
+beacon_miss(void *context, int pending)
 {
-	struct task *task = (struct task *)work;
-	struct ieee80211com *ic = task->ta_context;
+	struct ieee80211com *ic = context;
 	struct ieee80211vap *vap;
 
 	IEEE80211_LOCK(ic);
@@ -1502,10 +1496,9 @@ beacon_miss(struct work *work, void *arg)
 }
 
 static void
-beacon_swmiss(struct work *work, void *arg)
+beacon_swmiss(void *context, int pending)
 {
-	struct task *task = (struct task *)work;
-	struct ieee80211vap *vap = task->ta_context;
+	struct ieee80211vap *vap = context;
 	struct ieee80211com *ic = vap->iv_ic;
 
 	IEEE80211_LOCK(ic);
@@ -1745,10 +1738,9 @@ wakeupwaiting(struct ieee80211vap *vap0)
  * Handle post state change work common to all operating modes.
  */
 static void
-ieee80211_newstate_cb(struct work *work, void *xvap)
+ieee80211_newstate_cb(void *context, int pending)
 {
-	struct task *task = work->wk_dummy;
-	struct ieee80211vap *vap = task->ta_context;
+	struct ieee80211vap *vap = context;
 	struct ieee80211com *ic = vap->iv_ic;
 	enum ieee80211_state nstate, ostate;
 	int arg, rc;
