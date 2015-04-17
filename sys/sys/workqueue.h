@@ -53,7 +53,5 @@ int workqueue_create(struct workqueue **, const char *,
 void workqueue_destroy(struct workqueue *);
 
 void workqueue_enqueue(struct workqueue *, struct work *, struct cpu_info *);
-void workqueue_block(struct workqueue *);
-void workqueue_unblock(struct workqueue *);
 
 #endif /* _SYS_WORKQUEUE_H_ */

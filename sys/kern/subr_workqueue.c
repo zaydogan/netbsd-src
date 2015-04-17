@@ -63,11 +63,6 @@ struct workqueue {
 	void *wq_ptr;
 };
 
-/* __BIT(0): WQ_MPSAFE */
-/* __BIT(1): WQ_PERCPU */
-#define	WQ_INT_PENDING	__BIT(29)
-#define	WQ_INT_BLOCK	__BIT(30)
-
 #define	WQ_SIZE		(roundup2(sizeof(struct workqueue), coherency_unit))
 #define	WQ_QUEUE_SIZE	(roundup2(sizeof(struct workqueue_queue), coherency_unit))
 
@@ -304,33 +299,6 @@ workqueue_enqueue(struct workqueue *wq, struct work *wk0, struct cpu_info *ci)
 
 	mutex_enter(&q->q_mutex);
 	SIMPLEQ_INSERT_TAIL(&q->q_queue, wk, wk_entry);
+	cv_signal(&q->q_cv);
 	mutex_exit(&q->q_mutex);
-	if (wq->wq_flags & WQ_INT_BLOCK)
-		wq->wq_flags |= WQ_INT_PENDING;
-	else
-		cv_signal(&q->q_cv);
-}
-
-void
-workqueue_block(struct workqueue *wq)
-{
-
-	wq->wq_flags |= WQ_INT_BLOCK;
-}
-
-void
-workqueue_unblock(struct workqueue *wq)
-{
-	struct cpu_info *ci;
-	CPU_INFO_ITERATOR cii;
-	struct workqueue_queue *q;
-	int oflags = wq->wq_flags;
-
-	wq->wq_flags &= ~(WQ_INT_BLOCK|WQ_INT_PENDING);
-	if (oflags & WQ_INT_PENDING) {
-		for (CPU_INFO_FOREACH(cii, ci)) {
-			q = workqueue_queue_lookup(wq, ci);
-			cv_signal(&q->q_cv);
-		}
-	}
 }
