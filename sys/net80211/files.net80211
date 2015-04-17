@@ -41,6 +41,7 @@ file	net80211/ieee80211_scan.c		wlan
 file	net80211/ieee80211_scan_sta.c		wlan
 file	net80211/ieee80211_sta.c		wlan
 file	net80211/ieee80211_superg.c		wlan
+file	net80211/ieee80211_task.c		wlan
 file	net80211/ieee80211_tdma.c		wlan
 file	net80211/ieee80211_wds.c		wlan
 file	net80211/ieee80211_xauth.c		wlan
