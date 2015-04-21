@@ -1179,8 +1179,11 @@ static void
 parent_updown(void *context, int pending)
 {
 	struct ifnet *parent = context;
+	struct ifreq ifr;
 
-	parent->if_ioctl(parent, SIOCSIFFLAGS, NULL);
+	strlcpy(ifr.ifr_name, parent->if_xname, sizeof(ifr.ifr_name));
+	ifr.ifr_flags = parent->if_flags;
+	parent->if_ioctl(parent, SIOCSIFFLAGS, &ifr);
 }
 
 static void
