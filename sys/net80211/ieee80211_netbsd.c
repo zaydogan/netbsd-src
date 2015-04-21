@@ -427,7 +427,7 @@ ieee80211_node_dectestref(struct ieee80211_node *ni)
 {
 	/* XXX need equivalent of atomic_dec_and_test */
 	atomic_add_int(&ni->ni_refcnt, -1);
-	return atomic_cas_32(&ni->ni_refcnt, 0, 1);
+	return atomic_cas_32(&ni->ni_refcnt, 0, 1) == 1;
 }
 
 void
