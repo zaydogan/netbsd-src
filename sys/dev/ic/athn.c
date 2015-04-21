@@ -2786,8 +2786,10 @@ athn_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	switch (cmd) {
 	case SIOCSIFFLAGS:
+#if 0	/* XXX FBSD80211 disable athn0 up/down, need to use wlan i/f */
 		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
 			break;
+#endif
 
 		switch (ifp->if_flags & (IFF_UP | IFF_RUNNING)) {
 		case IFF_UP | IFF_RUNNING:
