@@ -186,8 +186,6 @@ ieee80211_taskqueue_enqueue(struct ieee80211_taskqueue *tq,
 			STAILQ_INSERT_HEAD(&tq->tq_queue, task, ta_link);
 	}
 
-	STAILQ_INSERT_TAIL(&tq->tq_queue, task, ta_link);
-
 	task->ta_pending = 1;
 	if (!ISSET(tq->tq_flags, TQ_BLOCKED)) {
 		workqueue_enqueue(tq->tq_wq, &task->ta_work, NULL);
