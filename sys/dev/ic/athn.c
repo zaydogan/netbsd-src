@@ -2520,6 +2520,7 @@ athn_scan_mindwell(struct ieee80211_scan_state *ss)
 Static int
 athn_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 {
+	struct athn_vap *av = (void *)vap;
 	struct ieee80211com *ic = vap->iv_ic;
 	struct ifnet *ifp = ic->ic_ifp;
 	struct athn_softc *sc = ifp->if_softc;
@@ -2583,7 +2584,7 @@ athn_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		break;
 	}
 
-	return sc->sc_newstate(ic, nstate, arg);
+	return av->av_newstate(vap, nstate, arg);
 }
 
 PUBLIC int

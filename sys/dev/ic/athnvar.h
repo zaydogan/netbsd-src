@@ -493,9 +493,6 @@ struct athn_softc {
 	void				(*sc_enable_extsynch)(
 					    struct athn_softc *);
 
-	int				(*sc_newstate)(struct ieee80211com *,
-					    enum ieee80211_state, int);
-
 	bus_dma_tag_t			sc_dmat;
 
 	callout_t			sc_calib_to;
