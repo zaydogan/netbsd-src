@@ -339,7 +339,7 @@ ieee80211_pwrsave(struct ieee80211_node *ni, struct mbuf *m)
 		    psq->psq_drops, psq->psq_len);
 #ifdef IEEE80211_DEBUG
 		if (ieee80211_msg_dumppkts(vap))
-			ieee80211_dump_pkt(ni->ni_ic, mtod(m, caddr_t),
+			ieee80211_dump_pkt(ni->ni_ic, mtod(m, void *),
 			    m->m_len, -1, -1);
 #endif
 		psq_mfree(m);

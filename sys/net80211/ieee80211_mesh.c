@@ -853,7 +853,7 @@ mesh_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		case IEEE80211_S_RUN:
 #ifdef IEEE80211_DEBUG
 			if (ieee80211_msg_debug(vap)) {
-				struct ieee80211_node *ni = vap->iv_bss;
+				ni = vap->iv_bss;
 				ieee80211_note(vap,
 				    "synchronized with %s meshid ",
 				    ether_sprintf(ni->ni_meshid));

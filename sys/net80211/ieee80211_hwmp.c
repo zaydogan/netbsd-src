@@ -59,6 +59,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 #include <net/if_llc.h>
 
@@ -1391,7 +1392,7 @@ hwmp_recv_prep(struct ieee80211vap *vap, struct ieee80211_node *ni,
 	    rt->rt_flags & IEEE80211_MESHRT_FLAGS_VALID ?
 	    "prefer" : "update",
 	    meshprep->prep_targetaddr, ":",
-	    rt->rt_nhops, prep->prep_hopcount + 1,
+	    rt->rt_nhops, meshprep->prep_hopcount + 1,
 	    rt->rt_metric, metric);
 
 	hr->hr_seq = meshprep->prep_targetseq;

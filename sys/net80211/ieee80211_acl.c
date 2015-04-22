@@ -56,6 +56,7 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_acl.c,v 1.9 2011/06/12 00:07:19 christos E
 #include <sys/socket.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 #include <net/route.h>
 

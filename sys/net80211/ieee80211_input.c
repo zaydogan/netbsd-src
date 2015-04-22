@@ -854,7 +854,9 @@ ieee80211_getbssid(const struct ieee80211vap *vap,
 	return wh->i_addr3;
 }
 
+#ifdef __FreeBSD__
 #include <machine/stdarg.h>
+#endif
 
 void
 ieee80211_note(const struct ieee80211vap *vap, const char *fmt, ...)

@@ -46,6 +46,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/socket.h>
 
 #include <net/if.h>
+#include <net/if_ether.h>
 #include <net/if_media.h>
 
 #include <net80211/ieee80211_var.h>
