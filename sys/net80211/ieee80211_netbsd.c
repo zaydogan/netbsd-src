@@ -310,44 +310,62 @@ ieee80211_sysctl_msecs_ticks(SYSCTL_HANDLER_ARGS)
 	*(int *)arg1 = (t < 1) ? 1 : t;
 	return 0;
 }
+#endif
 
 static int
-ieee80211_sysctl_inact(SYSCTL_HANDLER_ARGS)
+ieee80211_sysctl_inact(SYSCTLFN_ARGS)
 {
-	int inact = (*(int *)arg1) * IEEE80211_INACT_WAIT;
 	int error;
+	struct sysctlnode node;
+	int *inactp;
+	int inact;
 
-	error = sysctl_handle_int(oidp, &inact, 0, req);
-	if (error || !req->newptr)
+	node = *rnode;
+	inactp = node.sysctl_data;
+	inact = *inactp * IEEE80211_INACT_WAIT;
+	node.sysctl_data = &inact;
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error != 0 || newp == NULL)
 		return error;
-	*(int *)arg1 = inact / IEEE80211_INACT_WAIT;
+
+	*inactp = inact / IEEE80211_INACT_WAIT;
 	return 0;
 }
 
 static int
-ieee80211_sysctl_parent(SYSCTL_HANDLER_ARGS)
+ieee80211_sysctl_parent(SYSCTLFN_ARGS)
 {
-	struct ieee80211com *ic = arg1;
-	const char *name = ic->ic_ifp->if_xname;
+	struct sysctlnode node;
+	struct ieee80211com *ic;
+	char *xname;
 
-	return SYSCTL_OUT(req, name, strlen(name));
+	node = *rnode;
+	ic = node.sysctl_data;
+	xname = ic->ic_ifp->if_xname;
+	node.sysctl_data = xname;
+	return sysctl_lookup(SYSCTLFN_CALL(&node));
 }
 
 static int
-ieee80211_sysctl_radar(SYSCTL_HANDLER_ARGS)
+ieee80211_sysctl_radar(SYSCTLFN_ARGS)
 {
-	struct ieee80211com *ic = arg1;
-	int t = 0, error;
+	int error;
+	struct sysctlnode node;
+	struct ieee80211com *ic;
+	int t = 0;
 
-	error = sysctl_handle_int(oidp, &t, 0, req);
-	if (error || !req->newptr)
+	node = *rnode;
+	ic = node.sysctl_data;
+	node.sysctl_data = &t;
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error != 0 || newp == NULL)
 		return error;
+
 	IEEE80211_LOCK(ic);
 	ieee80211_dfs_notify_radar(ic, ic->ic_curchan);
 	IEEE80211_UNLOCK(ic);
 	return 0;
 }
-#endif
 
 void
 ieee80211_sysctl_attach(struct ieee80211com *ic)
@@ -363,7 +381,7 @@ void
 ieee80211_sysctl_vattach(struct ieee80211vap *vap)
 {
 	struct ifnet *ifp = vap->iv_ifp;
-	const struct sysctlnode *rnode;
+	const struct sysctlnode *cnode, *rnode;
 
 	if (sysctl_createv(&vap->iv_clog, 0, NULL, &rnode,
 	    0, CTLTYPE_NODE, ifp->if_xname,
@@ -372,16 +390,19 @@ ieee80211_sysctl_vattach(struct ieee80211vap *vap)
 	    CTL_HW, wlan_root_num, CTL_CREATE, CTL_EOL) != 0)
 		goto bad;
 
-#ifdef notyet	/* XXX FBSD80211 sysctl */
-	SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-		"%parent", CTLTYPE_STRING | CTLFLAG_RD, vap->iv_ic, 0,
-		ieee80211_sysctl_parent, "A", "parent device");
-	SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-		"driver_caps", CTLFLAG_RW, &vap->iv_caps, 0,
-		"driver capabilities");
-#endif
+	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+	    CTLFLAG_READONLY, CTLTYPE_STRING, "parent",
+	    SYSCTL_DESCR("parent device"),
+	    ieee80211_sysctl_parent, 0, vap->iv_ic, 0,
+	    CTL_CREATE, CTL_EOL) != 0)
+		goto out;
+	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+	    CTLFLAG_READWRITE, CTLTYPE_INT, "driver_caps",
+	    SYSCTL_DESCR("driver capabilities"),
+	    NULL, 0, &vap->iv_caps, 0,
+	    CTL_CREATE, CTL_EOL) != 0)
+		goto out;
 #ifdef IEEE80211_DEBUG
-	const struct sysctlnode *cnode;
 	vap->iv_debug = ieee80211_debug;
 	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
 	    CTLFLAG_READWRITE, CTLTYPE_INT, "debug",
@@ -390,54 +411,73 @@ ieee80211_sysctl_vattach(struct ieee80211vap *vap)
 	    CTL_CREATE, CTL_EOL) != 0)
 		goto out;
 #endif
-#ifdef notyet	/* XXX FBSD80211 sysctl */
-	SYSCTL_ADD_INT(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-		"bmiss_max", CTLFLAG_RW, &vap->iv_bmiss_max, 0,
-		"consecutive beacon misses before scanning");
+	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+	    CTLFLAG_READWRITE, CTLTYPE_INT, "bmiss_max",
+	    SYSCTL_DESCR("consecutive beacon misses before scanning"),
+	    NULL, 0, &vap->iv_bmiss_max, 0,
+	    CTL_CREATE, CTL_EOL) != 0)
+		goto out;
 	/* XXX inherit from tunables */
-	SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-		"inact_run", CTLTYPE_INT | CTLFLAG_RW, &vap->iv_inact_run, 0,
-		ieee80211_sysctl_inact, "I",
-		"station inactivity timeout (sec)");
-	SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-		"inact_probe", CTLTYPE_INT | CTLFLAG_RW, &vap->iv_inact_probe, 0,
-		ieee80211_sysctl_inact, "I",
-		"station inactivity probe timeout (sec)");
-	SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-		"inact_auth", CTLTYPE_INT | CTLFLAG_RW, &vap->iv_inact_auth, 0,
-		ieee80211_sysctl_inact, "I",
-		"station authentication timeout (sec)");
-	SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-		"inact_init", CTLTYPE_INT | CTLFLAG_RW, &vap->iv_inact_init, 0,
-		ieee80211_sysctl_inact, "I",
-		"station initial state timeout (sec)");
+	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+	    CTLFLAG_READWRITE, CTLTYPE_INT, "inact_run",
+	    SYSCTL_DESCR("station inactivity timeout (sec)"),
+	    ieee80211_sysctl_inact, 0, &vap->iv_inact_run, 0,
+	    CTL_CREATE, CTL_EOL) != 0)
+		goto out;
+	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+	    CTLFLAG_READWRITE, CTLTYPE_INT, "inact_probe",
+	    SYSCTL_DESCR("station inactivity probe timeout (sec)"),
+	    ieee80211_sysctl_inact, 0, &vap->iv_inact_probe, 0,
+	    CTL_CREATE, CTL_EOL) != 0)
+		goto out;
+	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+	    CTLFLAG_READWRITE, CTLTYPE_INT, "inact_auth",
+	    SYSCTL_DESCR("station authentication timeout (sec)"),
+	    ieee80211_sysctl_inact, 0, &vap->iv_inact_auth, 0,
+	    CTL_CREATE, CTL_EOL) != 0)
+		goto out;
+	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+	    CTLFLAG_READWRITE, CTLTYPE_INT, "inact_init",
+	    SYSCTL_DESCR("station initial state timeout (sec)"),
+	    ieee80211_sysctl_inact, 0, &vap->iv_inact_init, 0,
+	    CTL_CREATE, CTL_EOL) != 0)
+		goto out;
 	if (vap->iv_htcaps & IEEE80211_HTC_HT) {
-		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-			"ampdu_mintraffic_bk", CTLFLAG_RW,
-			&vap->iv_ampdu_mintraffic[WME_AC_BK], 0,
-			"BK traffic tx aggr threshold (pps)");
-		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-			"ampdu_mintraffic_be", CTLFLAG_RW,
-			&vap->iv_ampdu_mintraffic[WME_AC_BE], 0,
-			"BE traffic tx aggr threshold (pps)");
-		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-			"ampdu_mintraffic_vo", CTLFLAG_RW,
-			&vap->iv_ampdu_mintraffic[WME_AC_VO], 0,
-			"VO traffic tx aggr threshold (pps)");
-		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-			"ampdu_mintraffic_vi", CTLFLAG_RW,
-			&vap->iv_ampdu_mintraffic[WME_AC_VI], 0,
-			"VI traffic tx aggr threshold (pps)");
+		if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+		    CTLFLAG_READWRITE, CTLTYPE_INT, "ampdu_mintraffic_bk",
+		    SYSCTL_DESCR("BK traffic tx aggr threshold (pps)"),
+		    NULL, 0, &vap->iv_ampdu_mintraffic[WME_AC_BK], 0,
+		    CTL_CREATE, CTL_EOL) != 0)
+			goto out;
+		if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+		    CTLFLAG_READWRITE, CTLTYPE_INT, "ampdu_mintraffic_be",
+		    SYSCTL_DESCR("BE traffic tx aggr threshold (pps)"),
+		    NULL, 0, &vap->iv_ampdu_mintraffic[WME_AC_BE], 0,
+		    CTL_CREATE, CTL_EOL) != 0)
+			goto out;
+		if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+		    CTLFLAG_READWRITE, CTLTYPE_INT, "ampdu_mintraffic_vo",
+		    SYSCTL_DESCR("VO traffic tx aggr threshold (pps)"),
+		    NULL, 0, &vap->iv_ampdu_mintraffic[WME_AC_VO], 0,
+		    CTL_CREATE, CTL_EOL) != 0)
+			goto out;
+		if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+		    CTLFLAG_READWRITE, CTLTYPE_INT, "ampdu_mintraffic_vi",
+		    SYSCTL_DESCR("VI traffic tx aggr threshold (pps)"),
+		    NULL, 0, &vap->iv_ampdu_mintraffic[WME_AC_VI], 0,
+		    CTL_CREATE, CTL_EOL) != 0)
+			goto out;
 	}
 	if (vap->iv_caps & IEEE80211_C_DFS) {
-		SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-			"radar", CTLTYPE_INT | CTLFLAG_RW, vap->iv_ic, 0,
-			ieee80211_sysctl_radar, "I", "simulate radar event");
+		if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+		    CTLFLAG_READWRITE, CTLTYPE_INT, "radar",
+		    SYSCTL_DESCR("simulate radar event"),
+		    ieee80211_sysctl_radar, 0, vap->iv_ic, 0,
+		    CTL_CREATE, CTL_EOL) != 0)
+			goto out;
 	}
-#endif
-#ifdef IEEE80211_DEBUG
+
  out:
-#endif
 	return;
 
  bad:
