@@ -345,8 +345,7 @@ struct ieee80211vap {
 	struct ifmedia		iv_media;	/* interface media config */
 	struct ifnet		*iv_ifp;	/* associated device */
 	struct bpf_if		*iv_rawbpf;	/* packet filter structure */
-	struct sysctl_ctx_list	*iv_sysctl;	/* dynamic sysctl context */
-	struct sysctl_oid	*iv_oid;	/* net.wlan.X sysctl oid */
+	struct sysctllog	*iv_clog;
 
 	TAILQ_ENTRY(ieee80211vap) iv_next;	/* list of vap instances */
 	struct ieee80211com	*iv_ic;		/* back ptr to common state */

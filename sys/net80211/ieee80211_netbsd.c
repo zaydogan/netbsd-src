@@ -65,17 +65,46 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_input.h>
 
-#ifdef notyet	/* XXX FBSD80211 sysctl */
-SYSCTL_NODE(_net, OID_AUTO, wlan, CTLFLAG_RD, 0, "IEEE 80211 parameters");
-#endif
-
+static int wlan_root_num;
 #ifdef IEEE80211_DEBUG
 int	ieee80211_debug = 0;
-#ifdef notyet	/* XXX FBSD80211 sysctl */
-SYSCTL_INT(_net_wlan, OID_AUTO, debug, CTLFLAG_RW, &ieee80211_debug,
-	    0, "debugging printfs");
 #endif
+
+SYSCTL_SETUP(sysctl_wlan, "sysctl wlan subtree setupdebugging printfs")
+{
+	const struct sysctlnode *rnode;
+
+	if (sysctl_createv(clog, 0, NULL, NULL,
+	    0, CTLTYPE_NODE, "hw",
+	    NULL,
+	    NULL, 0, NULL, 0,
+	    CTL_HW, CTL_EOL) != 0)
+		goto bad;
+
+	if (sysctl_createv(clog, 0, NULL, &rnode,
+	    0, CTLTYPE_NODE, "wlan",
+	    SYSCTL_DESCR("wlan interface"),
+	    NULL, 0, NULL, 0,
+	    CTL_HW, CTL_CREATE, CTL_EOL) != 0)
+		goto bad;
+	wlan_root_num = rnode->sysctl_num;
+
+#ifdef IEEE80211_DEBUG
+	const struct sysctlnode *cnode;
+	if (sysctl_createv(clog, 0, &rnode, &cnode,
+	    CTLFLAG_READWRITE, CTLTYPE_INT, "debug",
+	    SYSCTL_DESCR("debugging printfs"),
+	    NULL, 0, &ieee80211_debug, 0,
+	    CTL_CREATE, CTL_EOL) != 0)
+		goto out;
+
+ out:
 #endif
+	return;
+
+ bad:
+	aprint_error("could not attach wlan sysctl node\n");
+}
 
 static int	wlan_clone_create(struct if_clone *, int);
 static int	wlan_clone_destroy(struct ifnet *);
@@ -333,35 +362,35 @@ ieee80211_sysctl_detach(struct ieee80211com *ic)
 void
 ieee80211_sysctl_vattach(struct ieee80211vap *vap)
 {
-#ifdef notyet	/* XXX FBSD80211 sysctl */
 	struct ifnet *ifp = vap->iv_ifp;
-	struct sysctl_ctx_list *ctx;
-	struct sysctl_oid *oid;
-	char num[14];			/* sufficient for 32 bits */
+	const struct sysctlnode *rnode;
 
-	ctx = (struct sysctl_ctx_list *) malloc(sizeof(struct sysctl_ctx_list),
-		M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (ctx == NULL) {
-		if_printf(ifp, "%s: cannot allocate sysctl context!\n",
-			__func__);
-		return;
-	}
-	sysctl_ctx_init(ctx);
-	snprintf(num, sizeof(num), "%u", ifp->if_dunit);
-	oid = SYSCTL_ADD_NODE(ctx, &SYSCTL_NODE_CHILDREN(_net, wlan),
-		OID_AUTO, num, CTLFLAG_RD, NULL, "");
+	if (sysctl_createv(&vap->iv_clog, 0, NULL, &rnode,
+	    0, CTLTYPE_NODE, ifp->if_xname,
+	    SYSCTL_DESCR("wlan interface"),
+	    NULL, 0, NULL, 0,
+	    CTL_HW, wlan_root_num, CTL_CREATE, CTL_EOL) != 0)
+		goto bad;
+
+#ifdef notyet	/* XXX FBSD80211 sysctl */
 	SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
 		"%parent", CTLTYPE_STRING | CTLFLAG_RD, vap->iv_ic, 0,
 		ieee80211_sysctl_parent, "A", "parent device");
 	SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
 		"driver_caps", CTLFLAG_RW, &vap->iv_caps, 0,
 		"driver capabilities");
-#ifdef IEEE80211_DEBUG
-	vap->iv_debug = ieee80211_debug;
-	SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
-		"debug", CTLFLAG_RW, &vap->iv_debug, 0,
-		"control debugging printfs");
 #endif
+#ifdef IEEE80211_DEBUG
+	const struct sysctlnode *cnode;
+	vap->iv_debug = ieee80211_debug;
+	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
+	    CTLFLAG_READWRITE, CTLTYPE_INT, "debug",
+	    SYSCTL_DESCR("control debugging printfs"),
+	    NULL, 0, &vap->iv_debug, 0,
+	    CTL_CREATE, CTL_EOL) != 0)
+		goto out;
+#endif
+#ifdef notyet	/* XXX FBSD80211 sysctl */
 	SYSCTL_ADD_INT(ctx, SYSCTL_CHILDREN(oid), OID_AUTO,
 		"bmiss_max", CTLFLAG_RW, &vap->iv_bmiss_max, 0,
 		"consecutive beacon misses before scanning");
@@ -405,21 +434,22 @@ ieee80211_sysctl_vattach(struct ieee80211vap *vap)
 			"radar", CTLTYPE_INT | CTLFLAG_RW, vap->iv_ic, 0,
 			ieee80211_sysctl_radar, "I", "simulate radar event");
 	}
-	vap->iv_sysctl = ctx;
-	vap->iv_oid = oid;
 #endif
+#ifdef IEEE80211_DEBUG
+ out:
+#endif
+	return;
+
+ bad:
+	if_printf(ifp, "could not attach %s sysctl node\n", ifp->if_xname);
 }
 
 void
 ieee80211_sysctl_vdetach(struct ieee80211vap *vap)
 {
-#ifdef notyet	/* XXX FBSD80211 sysctl */
-	if (vap->iv_sysctl != NULL) {
-		sysctl_ctx_free(vap->iv_sysctl);
-		free(vap->iv_sysctl, M_DEVBUF);
-		vap->iv_sysctl = NULL;
-	}
-#endif
+
+	if (vap->iv_clog != NULL)
+		sysctl_teardown(&vap->iv_clog);
 }
 
 int
