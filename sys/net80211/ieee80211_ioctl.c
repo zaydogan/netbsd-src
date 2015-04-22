@@ -4726,6 +4726,32 @@ ieee80211_vap_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
+	/*
+	 * The convention is that ENETRESET means an operation
+	 * requires a complete re-initialization of the device (e.g.
+	 * changing something that affects the association state).
+	 * ERESTART means the request may be handled with only a
+	 * reload of the hardware state.  We hand ERESTART requests
+	 * to the iv_reset callback so the driver can decide.  If
+	 * a device does not fillin iv_reset then it defaults to one
+	 * that returns ENETRESET.  Otherwise a driver may return
+	 * ENETRESET (in which case a full reset will be done) or
+	 * 0 to mean there's no need to do anything (e.g. when the
+	 * change has no effect on the driver/device).
+	 */
+	if (error == ERESTART)
+		error = IFNET_IS_UP_RUNNING(vap->iv_ifp) ?
+		    vap->iv_reset(vap, 0/*XXX ireq->i_type*/) : 0;
+	if (error == ENETRESET) {
+		/* XXX need to re-think AUTO handling */
+		if (IS_UP_AUTO(vap))
+#ifdef notyet	/* XXX FBSD80211 vap, dev if == vap if */
+			ieee80211_init(vap);
+#else
+			ieee80211_init(vap->iv_ifp);
+#endif
+		error = 0;
+	}
 	return error;
 }
 
