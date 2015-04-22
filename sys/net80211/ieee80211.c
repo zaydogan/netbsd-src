@@ -980,7 +980,7 @@ ieee80211_find_channel(struct ieee80211com *ic, int freq, int flags)
 	flags &= IEEE80211_CHAN_ALLTURBO;
 	c = ic->ic_prevchan;
 	if (c != NULL && c->ic_freq == freq &&
-	    (c->ic_flags & IEEE80211_CHAN_ALLTURBO) == flags)
+	    (c->ic_flags & flags) == flags)
 		return c;
 	/* brute force search */
 	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
@@ -988,7 +988,7 @@ ieee80211_find_channel(struct ieee80211com *ic, int freq, int flags)
 		if (c->ic_flags == 0)
 			continue;
 		if (c->ic_freq == freq &&
-		    (c->ic_flags & IEEE80211_CHAN_ALLTURBO) == flags)
+		    (c->ic_flags & flags) == flags)
 			return c;
 	}
 	return NULL;
@@ -1008,7 +1008,7 @@ ieee80211_find_channel_byieee(struct ieee80211com *ic, int ieee, int flags)
 	flags &= IEEE80211_CHAN_ALLTURBO;
 	c = ic->ic_prevchan;
 	if (c != NULL && c->ic_ieee == ieee &&
-	    (c->ic_flags & IEEE80211_CHAN_ALLTURBO) == flags)
+	    (c->ic_flags & flags) == flags)
 		return c;
 	/* brute force search */
 	for (i = 0; i < IEEE80211_CHAN_MAX; i++) {
@@ -1016,7 +1016,7 @@ ieee80211_find_channel_byieee(struct ieee80211com *ic, int ieee, int flags)
 		if (c->ic_flags == 0)
 			continue;
 		if (c->ic_ieee == ieee &&
-		    (c->ic_flags & IEEE80211_CHAN_ALLTURBO) == flags)
+		    (c->ic_flags & flags) == flags)
 			return c;
 	}
 	return NULL;
