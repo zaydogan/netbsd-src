@@ -65,46 +65,9 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_input.h>
 
-static int wlan_root_num;
 #ifdef IEEE80211_DEBUG
 int	ieee80211_debug = 0;
 #endif
-
-SYSCTL_SETUP(sysctl_wlan, "sysctl wlan subtree setupdebugging printfs")
-{
-	const struct sysctlnode *rnode;
-
-	if (sysctl_createv(clog, 0, NULL, NULL,
-	    0, CTLTYPE_NODE, "hw",
-	    NULL,
-	    NULL, 0, NULL, 0,
-	    CTL_HW, CTL_EOL) != 0)
-		goto bad;
-
-	if (sysctl_createv(clog, 0, NULL, &rnode,
-	    0, CTLTYPE_NODE, "wlan",
-	    SYSCTL_DESCR("wlan interface"),
-	    NULL, 0, NULL, 0,
-	    CTL_HW, CTL_CREATE, CTL_EOL) != 0)
-		goto bad;
-	wlan_root_num = rnode->sysctl_num;
-
-#ifdef IEEE80211_DEBUG
-	const struct sysctlnode *cnode;
-	if (sysctl_createv(clog, 0, &rnode, &cnode,
-	    CTLFLAG_READWRITE, CTLTYPE_INT, "debug",
-	    SYSCTL_DESCR("debugging printfs"),
-	    NULL, 0, &ieee80211_debug, 0,
-	    CTL_CREATE, CTL_EOL) != 0)
-		goto out;
-
- out:
-#endif
-	return;
-
- bad:
-	aprint_error("could not attach wlan sysctl node\n");
-}
 
 static int	wlan_clone_create(struct if_clone *, int);
 static int	wlan_clone_destroy(struct ifnet *);
@@ -315,34 +278,39 @@ ieee80211_sysctl_msecs_ticks(SYSCTL_HANDLER_ARGS)
 static int
 ieee80211_sysctl_inact(SYSCTLFN_ARGS)
 {
-	int error;
+	int error, t;
 	struct sysctlnode node;
-	int *inactp;
-	int inact;
 
 	node = *rnode;
-	inactp = node.sysctl_data;
-	inact = *inactp * IEEE80211_INACT_WAIT;
-	node.sysctl_data = &inact;
+	/* sysctl_lookup copies the product from t.  Then, it
+	 * copies the new value onto t.
+	 */
+	t = *(int*)rnode->sysctl_data * IEEE80211_INACT_WAIT;
+	node.sysctl_data = &t;
 	error = sysctl_lookup(SYSCTLFN_CALL(&node));
 	if (error != 0 || newp == NULL)
 		return error;
 
-	*inactp = inact / IEEE80211_INACT_WAIT;
-	return 0;
+	/* The new value was in seconds.  Convert to inactivity-wait
+	 * intervals.  There are IEEE80211_INACT_WAIT seconds per
+	 * interval.
+	 */
+	*(int*)rnode->sysctl_data = t / IEEE80211_INACT_WAIT;
+
+	return (0);
 }
 
 static int
 ieee80211_sysctl_parent(SYSCTLFN_ARGS)
 {
-	struct sysctlnode node;
 	struct ieee80211com *ic;
-	char *xname;
+	char pname[IFNAMSIZ];
+	struct sysctlnode node;
 
 	node = *rnode;
 	ic = node.sysctl_data;
-	xname = ic->ic_ifp->if_xname;
-	node.sysctl_data = xname;
+	strncpy(pname, ic->ic_ifp->if_xname, IFNAMSIZ);
+	node.sysctl_data = pname;
 	return sysctl_lookup(SYSCTLFN_CALL(&node));
 }
 
@@ -367,9 +335,51 @@ ieee80211_sysctl_radar(SYSCTLFN_ARGS)
 	return 0;
 }
 
+/*
+ * Create or get top of sysctl tree net.link.ieee80211.
+ */
+static const struct sysctlnode *
+ieee80211_sysctl_treetop(struct sysctllog **log)
+{
+	int rc;
+	const struct sysctlnode *rnode;
+
+	if ((rc = sysctl_createv(log, 0, NULL, &rnode,
+	    CTLFLAG_PERMANENT, CTLTYPE_NODE, "link",
+	    SYSCTL_DESCR("link-layer statistics and controls"),
+	    NULL, 0, NULL, 0,
+	    CTL_NET, PF_LINK, CTL_EOL)) != 0)
+		goto err;
+
+	if ((rc = sysctl_createv(log, 0, &rnode, &rnode,
+	    CTLFLAG_PERMANENT, CTLTYPE_NODE, "ieee80211",
+	    SYSCTL_DESCR("IEEE 802.11 WLAN statistics and controls"),
+	    NULL, 0, NULL, 0,
+	    CTL_CREATE, CTL_EOL)) != 0)
+		goto err;
+
+#ifdef IEEE80211_DEBUG
+	if (sysctl_createv(log, 0, &rnode, NULL,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_INT, "debug",
+	    SYSCTL_DESCR("debugging printfs"),
+	    NULL, 0, &ieee80211_debug, 0,
+	    CTL_CREATE, CTL_EOL) != 0)
+		goto err;
+#endif
+
+	return rnode;
+
+ err:
+	printf("%s: sysctl_createv failed, rc = %d\n", __func__, rc);
+	return NULL;
+}
+
 void
 ieee80211_sysctl_attach(struct ieee80211com *ic)
 {
+
+	if (ieee80211_sysctl_treetop(NULL) == NULL)
+		return;
 }
 
 void
@@ -383,11 +393,14 @@ ieee80211_sysctl_vattach(struct ieee80211vap *vap)
 	struct ifnet *ifp = vap->iv_ifp;
 	const struct sysctlnode *cnode, *rnode;
 
-	if (sysctl_createv(&vap->iv_clog, 0, NULL, &rnode,
+	if ((rnode = ieee80211_sysctl_treetop(NULL)) == NULL)
+		return;
+
+	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &rnode,
 	    0, CTLTYPE_NODE, ifp->if_xname,
 	    SYSCTL_DESCR("wlan interface"),
 	    NULL, 0, NULL, 0,
-	    CTL_HW, wlan_root_num, CTL_CREATE, CTL_EOL) != 0)
+	    CTL_CREATE, CTL_EOL) != 0)
 		goto bad;
 
 	if (sysctl_createv(&vap->iv_clog, 0, &rnode, &cnode,
