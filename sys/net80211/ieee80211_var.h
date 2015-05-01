@@ -33,6 +33,9 @@
 /*
  * Definitions for IEEE 802.11 drivers.
  */
+#define	IEEE80211_DEBUG
+#undef	IEEE80211_DEBUG_REFCNT			/* node refcnt stuff */
+
 /* NB: portability glue must go first */
 #if defined(__NetBSD__)
 #include <net80211/ieee80211_netbsd.h>
