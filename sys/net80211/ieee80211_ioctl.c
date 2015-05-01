@@ -3352,11 +3352,18 @@ ieee80211_ioctl_scanreq(struct ieee80211vap *vap, struct ieee80211req *ireq)
 	if ((ic->ic_ifp->if_flags & IFF_RUNNING) == 0)
 		return ENXIO;
 
-	if (ireq->i_len != sizeof(sr))
+	if (ireq->i_len == 0) {
+		memset(&sr, 0, sizeof(sr));
+		sr.sr_flags = IEEE80211_IOC_SCAN_ACTIVE
+		    | IEEE80211_IOC_SCAN_NOJOIN
+		    | IEEE80211_IOC_SCAN_ONCE;
+		sr.sr_duration = IEEE80211_IOC_SCAN_FOREVER;
+	} else if (ireq->i_len == sizeof(sr)) {
+		error = copyin(ireq->i_data, &sr, sizeof(sr));
+		if (error != 0)
+			return error;
+	} else
 		return EINVAL;
-	error = copyin(ireq->i_data, &sr, sizeof(sr));
-	if (error != 0)
-		return error;
 	return ieee80211_scanreq(vap, &sr);
 }
 
