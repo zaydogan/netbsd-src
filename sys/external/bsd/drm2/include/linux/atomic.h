@@ -208,17 +208,27 @@ clear_bit(unsigned int bit, volatile unsigned long *ptr)
 static inline void
 change_bit(unsigned int bit, volatile unsigned long *ptr)
 {
+#if defined(__x86_64__)
+	asm volatile ("lock btc %1,%0" : "+m" (*ptr) : "Ir" (bit) : "memory" );
+#else
 	const unsigned int units = (sizeof(*ptr) * CHAR_BIT);
 	volatile unsigned long *const p = &ptr[bit / units];
 	const unsigned long mask = (1UL << (bit % units));
 	unsigned long v;
 
 	do v = *p; while (atomic_cas_ulong(p, v, (v ^ mask)) != v);
+#endif
 }
 
 static inline unsigned long
 test_and_set_bit(unsigned int bit, volatile unsigned long *ptr)
 {
+#if defined(__x86_64__)
+	char c;
+	asm volatile ("lock bts %2, %0; setc %1"
+	    : "+m" (*ptr), "=qm" (c) : "Ir" (bit) : "memory");
+	return c != 0;
+#else
 	const unsigned int units = (sizeof(*ptr) * CHAR_BIT);
 	volatile unsigned long *const p = &ptr[bit / units];
 	const unsigned long mask = (1UL << (bit % units));
@@ -227,11 +237,18 @@ test_and_set_bit(unsigned int bit, volatile unsigned long *ptr)
 	do v = *p; while (atomic_cas_ulong(p, v, (v | mask)) != v);
 
 	return ((v & mask) != 0);
+#endif
 }
 
 static inline unsigned long
 test_and_clear_bit(unsigned int bit, volatile unsigned long *ptr)
 {
+#if defined(__x86_64__)
+	char c;
+	asm volatile ("lock btr %2, %0; setc %1"
+	    : "+m" (*ptr), "=qm" (c) : "Ir" (bit) : "memory");
+	return c != 0;
+#else
 	const unsigned int units = (sizeof(*ptr) * CHAR_BIT);
 	volatile unsigned long *const p = &ptr[bit / units];
 	const unsigned long mask = (1UL << (bit % units));
@@ -240,11 +257,18 @@ test_and_clear_bit(unsigned int bit, volatile unsigned long *ptr)
 	do v = *p; while (atomic_cas_ulong(p, v, (v & ~mask)) != v);
 
 	return ((v & mask) != 0);
+#endif
 }
 
 static inline unsigned long
 test_and_change_bit(unsigned int bit, volatile unsigned long *ptr)
 {
+#if defined(__x86_64__)
+	char c;
+	asm volatile ("lock btc %2, %0; setc %1"
+	    : "+m" (*ptr), "=qm" (c) : "Ir" (bit) : "memory");
+	return c != 0;
+#else
 	const unsigned int units = (sizeof(*ptr) * CHAR_BIT);
 	volatile unsigned long *const p = &ptr[bit / units];
 	const unsigned long mask = (1UL << (bit % units));
@@ -253,6 +277,7 @@ test_and_change_bit(unsigned int bit, volatile unsigned long *ptr)
 	do v = *p; while (atomic_cas_ulong(p, v, (v ^ mask)) != v);
 
 	return ((v & mask) != 0);
+#endif
 }
 
 #if defined(MULTIPROCESSOR) && !defined(__HAVE_ATOMIC_AS_MEMBAR)
