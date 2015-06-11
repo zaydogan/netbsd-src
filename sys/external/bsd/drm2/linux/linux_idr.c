@@ -58,7 +58,7 @@ int
 linux_idr_module_init(void)
 {
 
-	mutex_init(&idr_cache.lock, MUTEX_DEFAULT, IPL_VM);
+	mutex_init(&idr_cache.lock, MUTEX_DEFAULT, IPL_SCHED);
 	SIMPLEQ_INIT(&idr_cache.preloaded_nodes);
 	SIMPLEQ_INIT(&idr_cache.discarded_nodes);
 	return 0;
@@ -115,7 +115,7 @@ void
 idr_init(struct idr *idr)
 {
 
-	mutex_init(&idr->idr_lock, MUTEX_DEFAULT, IPL_VM);
+	mutex_init(&idr->idr_lock, MUTEX_DEFAULT, IPL_SCHED);
 	rb_tree_init(&idr->idr_tree, &idr_rb_ops);
 }
 

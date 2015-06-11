@@ -91,7 +91,7 @@ static inline void
 spin_lock_init(spinlock_t *spinlock)
 {
 	/* XXX What's the right IPL?  IPL_DRM...?  */
-	mutex_init(&spinlock->sl_lock, MUTEX_DEFAULT, IPL_VM);
+	mutex_init(&spinlock->sl_lock, MUTEX_DEFAULT, IPL_SCHED);
 }
 
 /*

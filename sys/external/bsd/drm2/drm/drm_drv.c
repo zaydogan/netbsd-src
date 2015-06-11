@@ -234,7 +234,7 @@ const struct cdevsw drm_cdevsw = {
 	.d_discard = nodiscard,
 	/* XXX was D_TTY | D_NEGOFFSAFE */
 	/* XXX Add D_MPSAFE some day... */
-	.d_flag = D_NEGOFFSAFE,
+	.d_flag = D_NEGOFFSAFE | D_MPSAFE,
 };
 
 static const struct fileops drm_fileops = {
