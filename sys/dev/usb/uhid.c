@@ -146,14 +146,70 @@ extern struct cfdriver uhid_cd;
 CFATTACH_DECL_NEW(uhid, sizeof(struct uhid_softc), uhid_match, uhid_attach,
     uhid_detach, uhid_activate);
 
+static const struct uhid_quirk {
+	int		vendor;
+	int		product;
+	int		ifaceno;
+	int		reportid;
+
+	uint32_t 	quirk;
+#define UHID_QUIRK_NOMATCH	__BIT(0)
+} uhid_quirks[] = {
+	/* ThinkPad Compact USB keyboard with TrackPoint */
+	{
+		USB_VENDOR_LENOVO,USB_PRODUCT_LENOVO_COMPACTKBDWTP,
+		1, 16,
+		UHID_QUIRK_NOMATCH
+	},
+	{
+		USB_VENDOR_LENOVO,USB_PRODUCT_LENOVO_COMPACTKBDWTP,
+		1, 17,
+		UHID_QUIRK_NOMATCH
+	},
+	{
+		USB_VENDOR_LENOVO,USB_PRODUCT_LENOVO_COMPACTKBDWTP,
+		1, 19,
+		UHID_QUIRK_NOMATCH
+	},
+	{
+		USB_VENDOR_LENOVO,USB_PRODUCT_LENOVO_COMPACTKBDWTP,
+		1, 21,
+		UHID_QUIRK_NOMATCH
+	},
+	{
+		USB_VENDOR_LENOVO,USB_PRODUCT_LENOVO_COMPACTKBDWTP,
+		1, 22,
+		UHID_QUIRK_NOMATCH
+	},
+};
+
+static const struct uhid_quirk *
+uhid_find_quirk(const struct usbif_attach_arg *uiaa, const int reportid)
+{
+	int i;
+
+	for (i = 0; i < __arraycount(uhid_quirks); i++) {
+		const struct uhid_quirk *q = &uhid_quirks[i];
+		if (uiaa->uiaa_vendor == q->vendor &&
+		    uiaa->uiaa_product == q->product &&
+		    uiaa->uiaa_ifaceno == q->ifaceno &&
+		    reportid == q->reportid)
+			return q;
+	}
+	return NULL;
+}
+
 int
 uhid_match(device_t parent, cfdata_t match, void *aux)
 {
-#ifdef UHID_DEBUG
 	struct uhidev_attach_arg *uha = aux;
-#endif
+	const struct uhid_quirk *q;
 
 	DPRINTF(("uhid_match: report=%d\n", uha->reportid));
+
+	q = uhid_find_quirk(uha->uiaa, uha->reportid);
+	if (q != NULL && ISSET(q->quirk, UHID_QUIRK_NOMATCH))
+		return UMATCH_NONE;
 
 	if (match->cf_flags & 1)
 		return UMATCH_HIGHEST;
