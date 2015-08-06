@@ -129,14 +129,22 @@ wscons_start()
 				eval $DOIT $cmd
 				;;
 
-			encoding)
+			encoding|encoding.*)
+				dev=""
+				if [ "$type" != "encoding" ]; then
+					dev="-f /dev/${type##encoding.}"
+				fi
 				map=$arg1
-				cmd="$wsctl -w \"encoding=$map\""
+				cmd="$wsctl -w ${dev} \"encoding=$map\""
 				echo -n 'Keyboard '
 				eval $DOIT $cmd
 				;;
 
-			mapfile)
+			mapfile|mapfile.*)
+				dev=""
+				if [ "$type" != "mapfile" ]; then
+					dev="-f /dev/${type##mapfile.}"
+				fi
 				mapfile=$arg1
 				( while read entry; do
 				    case "$entry" in
@@ -144,7 +152,7 @@ wscons_start()
 					    continue
 					    ;;
 					*)
-					    cmd="$wsctl -w \"map+=$entry\""
+					    cmd="$wsctl -w ${dev} \"map+=$entry\""
 					    cmd="$cmd >/dev/null"
 					    eval $DOIT $cmd
 					    ;;
