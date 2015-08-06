@@ -46,7 +46,9 @@
 
 #define TABLEN(t)		(sizeof(t)/sizeof(t[0]))
 
-extern struct wskbd_map_data kbmap;	/* from keyboard.c */
+extern struct wsmux_device_list kbdevs;	/* from keyboard.c */
+extern struct wskbd_map_data *kbmap;	/* from keyboard.c */
+extern struct wskbd_map_data *kbmaps;	/* from keyboard.c */
 extern struct wskbd_map_data newkbmap;	/* from map_parse.y */
 
 struct nameint {
@@ -296,7 +298,10 @@ pr_field(struct field *f, const char *sep)
 		}
 		break;
 	case FMT_KBMAP:
-		print_kmap((struct wskbd_map_data *) f->valp);
+		for (i = 0; i < kbdevs.ndevices; i++) {
+			struct wskbd_map_data *map = *(struct wskbd_map_data **)f->valp;
+			print_kmap(&map[i]);
+		}
 		break;
 	case FMT_COLOR:
 		p = int2name(*((unsigned int *) f->valp), 1,
@@ -402,26 +407,29 @@ rd_field(struct field *f, char *val, int merge)
 		}
 		break;
 	case FMT_KBMAP:
-		if (! merge)
-			kbmap.maplen = 0;
-		map_scan_setinput(val);
-		yyparse();
-		if (merge) {
-			if (newkbmap.maplen < kbmap.maplen)
-				newkbmap.maplen = kbmap.maplen;
-			for (u = 0; u < kbmap.maplen; u++) {
-				mp = newkbmap.map + u;
-				if (mp->command == KS_voidSymbol &&
-				    mp->group1[0] == KS_voidSymbol &&
-				    mp->group1[1] == KS_voidSymbol &&
-				    mp->group2[0] == KS_voidSymbol &&
-				    mp->group2[1] == KS_voidSymbol)
-					*mp = kbmap.map[u];
+		for (i = 0; i < kbdevs.ndevices; i++) {
+			kbmap = &kbmaps[i];
+			if (! merge)
+				kbmap->maplen = 0;
+			map_scan_setinput(val);
+			yyparse();
+			if (merge) {
+				if (newkbmap.maplen < kbmap->maplen)
+					newkbmap.maplen = kbmap->maplen;
+				for (u = 0; u < kbmap->maplen; u++) {
+					mp = newkbmap.map + u;
+					if (mp->command == KS_voidSymbol &&
+					    mp->group1[0] == KS_voidSymbol &&
+					    mp->group1[1] == KS_voidSymbol &&
+					    mp->group2[0] == KS_voidSymbol &&
+					    mp->group2[1] == KS_voidSymbol)
+						*mp = kbmap->map[u];
+				}
 			}
+			kbmap->maplen = newkbmap.maplen;
+			memcpy(kbmap->map, newkbmap.map,
+			    kbmap->maplen * sizeof(struct wscons_keymap));
 		}
-		kbmap.maplen = newkbmap.maplen;
-		bcopy(newkbmap.map, kbmap.map,
-		    kbmap.maplen * sizeof(struct wscons_keymap));
 		break;
 	case FMT_COLOR:
 		i = name2int(val, color_tab, TABLEN(color_tab));

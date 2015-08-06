@@ -57,7 +57,7 @@
 
 #include "wsconsctl.h"
 
-extern struct wskbd_map_data kbmap;	/* from keyboard.c */
+extern struct wskbd_map_data *kbmap;	/* from keyboard.c */
 
 static struct wscons_keymap mapdata[KS_NUMKEYCODES];
 struct wskbd_map_data newkbmap;		/* used in util.c */
@@ -71,8 +71,8 @@ ksym_lookup(keysym_t ksym)
 	size_t i;
 	struct wscons_keymap *mp;
 
-	for (i = 0; i < kbmap.maplen; i++) {
-		mp = kbmap.map + i;
+	for (i = 0; i < kbmap->maplen; i++) {
+		mp = kbmap->map + i;
 		if (mp->command == ksym ||
 		    mp->group1[0] == ksym || mp->group1[1] == ksym ||
 		    mp->group2[0] == ksym || mp->group2[1] == ksym)
@@ -128,7 +128,7 @@ keysym_expr	: T_KEYSYM keysym_var "=" keysym_var {
 
 			dst = ksym_lookup($2);
 			src = ksym_lookup($4);
-			newkbmap.map[dst] = kbmap.map[src];
+			newkbmap.map[dst] = kbmap->map[src];
 			if (dst >= newkbmap.maplen)
 				newkbmap.maplen = dst + 1;
 		}

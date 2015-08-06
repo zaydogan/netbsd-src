@@ -31,6 +31,10 @@
 
 #include <sys/ioctl.h>
 #include <sys/time.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 
 #include <dev/wscons/wsksymdef.h>
 #include <dev/wscons/wsconsio.h>
@@ -45,9 +49,11 @@ static int kbtype;
 static int keyclick;
 static struct wskbd_bell_data bell;
 static struct wskbd_bell_data dfbell;
-static struct wscons_keymap mapdata[KS_NUMKEYCODES];
-struct wskbd_map_data kbmap = /* used in map_parse.y and in util.c */
-    { KS_NUMKEYCODES, mapdata };
+struct wsmux_device_list kbdevs;
+static int *kbfd;
+static struct wscons_keymap *mapdata;
+struct wskbd_map_data *kbmap; /* used in map_parse.y and in util.c */
+struct wskbd_map_data *kbmaps;
 static struct wskbd_keyrepeat_data repeat;
 static struct wskbd_keyrepeat_data dfrepeat;
 static struct wskbd_scroll_data scroll;
@@ -82,6 +88,8 @@ int keyboard_field_tab_len = sizeof(keyboard_field_tab) /
 void
 keyboard_get_values(int fd)
 {
+	char file[PATH_MAX];
+	int i;
 
 	if (field_by_value(&kbtype)->flags & FLG_GET)
 		if (ioctl(fd, WSKBDIO_GTYPE, &kbtype) < 0)
@@ -109,9 +117,66 @@ keyboard_get_values(int fd)
 		err(EXIT_FAILURE, "WSKBDIO_GETDEFAULTBELL");
 
 	if (field_by_value(&kbmap)->flags & FLG_GET) {
-		kbmap.maplen = KS_NUMKEYCODES;
-		if (ioctl(fd, WSKBDIO_GETMAP, &kbmap) < 0)
-			err(EXIT_FAILURE, "WSKBDIO_GETMAP");
+		if (ioctl(fd, WSMUXIO_LIST_DEVICES, &kbdevs) < 0) {
+			/* wskbd device */
+			kbdevs.ndevices = 1;
+			kbdevs.devices[0].type = WSMUX_KBD;
+			kbdevs.devices[0].idx = -1;	/* XXX */
+
+			kbfd = malloc(sizeof(*kbfd));
+			if (kbfd == NULL)
+				err(EXIT_FAILURE,
+				    "keyboard descriptor allocation failed");
+			kbfd[0] = fd;
+			kbmaps = malloc(sizeof(*kbmaps));
+			if (kbmaps == NULL)
+				err(EXIT_FAILURE,
+				    "keyboard map allocation failed");
+			mapdata = malloc(sizeof(*mapdata) * KS_NUMKEYCODES);
+			if (mapdata == NULL)
+				err(EXIT_FAILURE,
+				    "keyboard map data allocation failed");
+			kbmaps[0].maplen = KS_NUMKEYCODES;
+			kbmaps[0].map = &mapdata[0 * KS_NUMKEYCODES];
+			if (ioctl(kbfd[0], WSKBDIO_GETMAP, &kbmaps[0]) < 0)
+				err(EXIT_FAILURE, "WSKBDIO_GETMAP");
+		} else {
+			/* wsmux device */
+			if (kbdevs.ndevices < 1)
+				err(EXIT_FAILURE, "No mux devices");
+			for (i = 0; i < kbdevs.ndevices; i++) {
+				if (kbdevs.devices[i].type != WSMUX_KBD)
+					err(EXIT_FAILURE, "Not keyboard device");
+			}
+
+			kbfd = malloc(sizeof(*kbfd) * kbdevs.ndevices);
+			if (kbfd == NULL)
+				err(EXIT_FAILURE,
+				    "keyboard descriptor allocation failed");
+			kbmaps = malloc(sizeof(*kbmaps) * kbdevs.ndevices);
+			if (kbmaps == NULL)
+				err(EXIT_FAILURE,
+				    "keyboard map allocation failed");
+			mapdata = malloc(sizeof(*mapdata) * KS_NUMKEYCODES
+			    * kbdevs.ndevices);
+			if (mapdata == NULL)
+				err(EXIT_FAILURE,
+				    "keyboard map data allocation failed");
+			for (i = 0; i < kbdevs.ndevices; i++) {
+				snprintf(file, sizeof(file), "/dev/wskbd%d",
+				    kbdevs.devices[i].idx);
+				kbfd[i] = open(file, O_WRONLY);
+				if (kbfd[i] < 0)
+					kbfd[i] = open(file, O_RDONLY);
+				if (kbfd[i] < 0)
+					err(EXIT_FAILURE, "%s", file);
+				kbmaps[i].maplen = KS_NUMKEYCODES;
+				kbmaps[i].map = &mapdata[i * KS_NUMKEYCODES];
+				if (ioctl(kbfd[i], WSKBDIO_GETMAP, &kbmaps[i]) < 0)
+					err(EXIT_FAILURE, "WSKBDIO_GETMAP");
+			}
+		}
+		kbmap = &kbmaps[0];
 	}
 
 	repeat.which = 0;
@@ -163,6 +228,7 @@ keyboard_get_values(int fd)
 void
 keyboard_put_values(int fd)
 {
+	int i;
 
 	bell.which = 0;
 	if (field_by_value(&bell.pitch)->flags & FLG_SET)
@@ -198,8 +264,11 @@ keyboard_put_values(int fd)
 		pr_field(field_by_value(&dfbell.volume), " -> ");
 
 	if (field_by_value(&kbmap)->flags & FLG_SET) {
-		if (ioctl(fd, WSKBDIO_SETMAP, &kbmap) < 0)
-			err(EXIT_FAILURE, "WSKBDIO_SETMAP");
+		for (i = 0; i < kbdevs.ndevices; i++) {
+			if (ioctl(kbfd[i], WSKBDIO_SETMAP, &kbmaps[i]) < 0)
+				err(EXIT_FAILURE, "WSKBDIO_SETMAP");
+		}
+		kbmap = &kbmaps[0];
 		pr_field(field_by_value(&kbmap), " -> ");
 	}
 
