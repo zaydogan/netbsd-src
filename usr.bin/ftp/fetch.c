@@ -656,10 +656,10 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 			if (urltype == HTTPS_URL_T)
 				penv = getoptionvalue("https_proxy");
 #endif
-			if (proxyenv == NULL && IS_HTTP_TYPE(urltype))
-				proxyenv = getoptionvalue("http_proxy");
+			if (penv == NULL && IS_HTTP_TYPE(urltype))
+				penv = getoptionvalue("http_proxy");
 			else if (IS_FTP_TYPE(urltype))
-				proxyenv = getoptionvalue("ftp_proxy");
+				penv = getoptionvalue("ftp_proxy");
 		}
 		direction = "retrieved";
 		if (! EMPTYSTRING(penv)) {			/* use proxy */
