@@ -116,6 +116,7 @@
 
 #include "extern.h"
 #include "progressbar.h"
+#include "ssl.h"
 
 /*
  * Format of command table.
@@ -162,6 +163,9 @@ enum {
 	FEAT_REST_STREAM,	/* RESTart STREAM */
 	FEAT_SIZE,		/* SIZE */
 	FEAT_TVFS,		/* TVFS (not used) */
+	FEAT_PBSZ,		/* PBSZ */
+	FEAT_PROT,		/* PROT */
+	FEAT_AUTH_TLS,		/* AUTH TLS */
 	FEAT_max
 };
 
@@ -176,6 +180,7 @@ enum {
 #define	DEFAULTINCR	1024	/* default increment for `rate' command */
 
 #define	FTP_PORT	21	/* default if ! getservbyname("ftp/tcp") */
+#define	FTPS_PORT	990	/* default if ! getservbyname("ftps/tcp") */
 #define	HTTP_PORT	80	/* default if ! getservbyname("http/tcp") */
 #define	HTTPS_PORT	443	/* default if ! getservbyname("https/tcp") */
 #ifndef	GATE_PORT
@@ -255,6 +260,11 @@ GLOBAL	int	epsv6;		/* use EPSV/EPRT on IPv6 connections */
 GLOBAL	int	epsv6bad;	/* EPSV doesn't work on the current server */
 GLOBAL	int	editing;	/* command line editing enabled */
 GLOBAL	int	features[FEAT_max];	/* remote FEATures supported */
+#ifdef WITH_SSL
+GLOBAL	int	ftpssl;		/* use FTPS */
+GLOBAL	int	ftps_explicit;	/* FTPS explicit mode */
+GLOBAL	int	ftps_fallback;	/* explicit mode from implicit mode */
+#endif
 
 #ifndef NO_EDITCOMPLETE
 GLOBAL	EditLine *el;		/* editline(3) status structure */
@@ -275,6 +285,7 @@ GLOBAL	sa_family_t family;	/* address family to use for connections */
 GLOBAL	const char *ftpport;	/* port number to use for FTP connections */
 GLOBAL	const char *httpport;	/* port number to use for HTTP connections */
 #ifdef WITH_SSL
+GLOBAL	const char *ftpsport;	/* port number to use for FTPS connections */
 GLOBAL	const char *httpsport;	/* port number to use for HTTPS connections */
 #endif
 GLOBAL	const char *gateport;	/* port number to use for gateftp connections */
@@ -315,8 +326,8 @@ GLOBAL	void	(*reply_callback)(const char *);
 
 GLOBAL	volatile sig_atomic_t	sigint_raised;
 
-GLOBAL	FILE	*cin;
-GLOBAL	FILE	*cout;
+GLOBAL	FETCH	*cin;
+GLOBAL	FETCH	*cout;
 GLOBAL	int	 data;
 
 extern	struct cmd	cmdtab[];

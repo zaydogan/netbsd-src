@@ -43,6 +43,7 @@ __RCSID("$NetBSD: ssl.c,v 1.5 2015/09/16 15:32:53 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 
 #include <netinet/tcp.h>
@@ -57,6 +58,11 @@ __RCSID("$NetBSD: ssl.c,v 1.5 2015/09/16 15:32:53 joerg Exp $");
 
 extern int quit_time, verbose, ftp_debug;
 extern FILE *ttyout;
+
+struct fetch_ssl {
+	SSL	*ssl;
+	int	refcnt;
+};
 
 struct fetch_connect {
 	int			 sd;		/* file/socket descriptor */
@@ -74,7 +80,7 @@ struct fetch_connect {
 	int 			 issock;
 	int			 iserr;
 	int			 iseof;
-	SSL			*ssl;		/* SSL handle */
+	struct fetch_ssl	*ssl;		/* SSL handle */
 };
 
 /*
@@ -120,7 +126,8 @@ fetch_writev(struct fetch_connect *conn, struct iovec *iov, int iovcnt)
 		}
 		errno = 0;
 		if (conn->ssl != NULL)
-			len = SSL_write(conn->ssl, iov->iov_base, iov->iov_len);
+			len = SSL_write(conn->ssl->ssl, iov->iov_base,
+			    iov->iov_len);
 		else
 			len = writev(conn->sd, iov, iovcnt);
 		if (len == 0) {
@@ -151,14 +158,23 @@ fetch_writev(struct fetch_connect *conn, struct iovec *iov, int iovcnt)
 /*
  * Write to a connection w/ timeout
  */
-static int
-fetch_write(struct fetch_connect *conn, const char *str, size_t len)
+size_t
+fetch_write(void *ptr, size_t size, size_t nmemb, struct fetch_connect *conn)
 {
 	struct iovec iov[1];
+	int rv;
 
-	iov[0].iov_base = (char *)__UNCONST(str);
-	iov[0].iov_len = len;
-	return fetch_writev(conn, iov, 1);
+	if (size == 0 || nmemb == 0)
+		return 0;
+
+	iov[0].iov_base = ptr;
+	iov[0].iov_len = size * nmemb;
+	rv = fetch_writev(conn, iov, 1);
+	if (rv < 0) {
+		conn->iserr = 1;
+		return 0;
+	}
+	return rv;
 }
 
 /*
@@ -168,23 +184,34 @@ int
 fetch_printf(struct fetch_connect *conn, const char *fmt, ...)
 {
 	va_list ap;
+	int r;
+
+	va_start(ap, fmt);
+	r = fetch_vprintf(conn, fmt, ap);
+	va_end(ap);
+
+	return r;
+}
+
+int
+fetch_vprintf(struct fetch_connect *conn, const char *fmt, va_list ap)
+{
 	size_t len;
 	char *msg;
 	int r;
 
-	va_start(ap, fmt);
 	len = vasprintf(&msg, fmt, ap);
-	va_end(ap);
 
 	if (msg == NULL) {
 		errno = ENOMEM;
 		return -1;
 	}
 
-	r = fetch_write(conn, msg, len);
+	r = fetch_write(msg, 1, len, conn);
 	free(msg);
 	return r;
 }
+
 
 int
 fetch_fileno(struct fetch_connect *conn)
@@ -208,6 +235,13 @@ fetch_clearerr(struct fetch_connect *conn)
 }
 
 int
+fetch_eof(struct fetch_connect *conn)
+{
+
+	return conn->iseof;
+}
+
+int
 fetch_flush(struct fetch_connect *conn)
 {
 	int v;
@@ -228,9 +262,47 @@ struct fetch_connect *
 fetch_open(const char *fname, const char *fmode)
 {
 	struct fetch_connect *conn;
+	int mode, option;
 	int fd;
 
-	fd = open(fname, O_RDONLY); /* XXX: fmode */
+        switch (*fmode++) {
+	default: /* illegal mode */
+		return NULL;
+	case 'r': /* open for reading */
+		mode = O_RDONLY;
+		option = 0;
+		break;
+	case 'w': /* open for writing */
+		mode = O_WRONLY;
+		option = O_CREAT | O_TRUNC;
+		break;
+	case 'a': /* open for appending */
+		mode = O_WRONLY;
+		option = O_CREAT | O_APPEND;
+		break;
+        }
+	for (; *fmode != '\0'; fmode++) {
+		switch (*fmode) {
+		case '+':
+			mode = O_RDWR;
+			break;
+		case 'f':
+			option |= O_NONBLOCK;
+			break;
+		case 'e':
+			option |= O_CLOEXEC;
+			break;
+		case 'x':
+			option |= O_EXCL;
+			break;
+		case 'b':
+			break;
+		default:	/* We could produce a warning here */
+			break;
+		}
+	}
+
+	fd = open(fname, mode | option);
 	if (fd < 0)
 		return NULL;
 
@@ -249,22 +321,28 @@ struct fetch_connect *
 fetch_fdopen(int sd, const char *fmode)
 {
 	struct fetch_connect *conn;
+	struct stat sb;
 #if defined(SO_NOSIGPIPE) || defined(TCP_NOPUSH)
 	int opt = 1;
 #endif
+
+	if (fstat(sd, &sb) < 0)
+		return NULL;
 
 	if ((conn = calloc(1, sizeof(*conn))) == NULL)
 		return NULL;
 
 	conn->sd = sd;
-	conn->issock = 1;
-	fcntl(sd, F_SETFD, FD_CLOEXEC);
+	if (S_ISSOCK(sb.st_mode)) {
+		conn->issock = 1;
+		fcntl(sd, F_SETFD, FD_CLOEXEC);
 #ifdef SO_NOSIGPIPE
-	setsockopt(sd, SOL_SOCKET, SO_NOSIGPIPE, &opt, sizeof(opt));
+		setsockopt(sd, SOL_SOCKET, SO_NOSIGPIPE, &opt, sizeof(opt));
 #endif
 #ifdef TCP_NOPUSH
-	setsockopt(sd, IPPROTO_TCP, TCP_NOPUSH, &opt, sizeof(opt));
+		setsockopt(sd, IPPROTO_TCP, TCP_NOPUSH, &opt, sizeof(opt));
 #endif
+	}
 	return conn;
 }
 
@@ -275,7 +353,7 @@ fetch_close(struct fetch_connect *conn)
 
 	if (conn != NULL) {
 		fetch_flush(conn);
-		SSL_free(conn->ssl);
+		fetch_free_ssl(conn);
 		rv = close(conn->sd);
 		if (rv < 0) {
 			errno = rv;
@@ -288,8 +366,9 @@ fetch_close(struct fetch_connect *conn)
 	return rv;
 }
 
-#define FETCH_READ_WAIT		-2
-#define FETCH_READ_ERROR	-1
+#define FETCH_READ_INTR		-4
+#define FETCH_READ_WAIT		-3
+#define FETCH_READ_ERROR	-2
 
 static ssize_t
 fetch_ssl_read(SSL *ssl, void *buf, size_t len)
@@ -300,6 +379,9 @@ fetch_ssl_read(SSL *ssl, void *buf, size_t len)
 	rlen = SSL_read(ssl, buf, len);
 	if (rlen < 0) {
 		ssl_err = SSL_get_error(ssl, rlen);
+		if (ssl_err == SSL_ERROR_SYSCALL && errno == EINTR) {
+			return FETCH_READ_INTR;
+		}
 		if (ssl_err == SSL_ERROR_WANT_READ ||
 		    ssl_err == SSL_ERROR_WANT_WRITE) {
 			return FETCH_READ_WAIT;
@@ -317,7 +399,9 @@ fetch_nonssl_read(int sd, void *buf, size_t len)
 
 	rlen = read(sd, buf, len);
 	if (rlen < 0) {
-		if (errno == EAGAIN || errno == EINTR)
+		if (errno == EINTR)
+			return FETCH_READ_INTR;
+		if (errno == EAGAIN)
 			return FETCH_READ_WAIT;
 		return FETCH_READ_ERROR;
 	}
@@ -347,8 +431,8 @@ fetch_cache_data(struct fetch_connect *conn, char *src, size_t nbytes)
 	return 0;
 }
 
-ssize_t
-fetch_read(void *ptr, size_t size, size_t nmemb, struct fetch_connect *conn)
+static ssize_t
+fetch_read1(void *ptr, size_t size, size_t nmemb, struct fetch_connect *conn)
 {
 	struct timeval now, timeout, delta;
 	fd_set readfds;
@@ -403,7 +487,7 @@ fetch_read(void *ptr, size_t size, size_t nmemb, struct fetch_connect *conn)
 		 * slightly) when reading small amounts of data.
 		 */
 		if (conn->ssl != NULL)
-			rlen = fetch_ssl_read(conn->ssl, buf, len);
+			rlen = fetch_ssl_read(conn->ssl->ssl, buf, len);
 		else
 			rlen = fetch_nonssl_read(conn->sd, buf, len);
 		if (rlen == 0) {
@@ -413,9 +497,10 @@ fetch_read(void *ptr, size_t size, size_t nmemb, struct fetch_connect *conn)
 			buf += rlen;
 			total += rlen;
 			continue;
+		} else if (rlen == FETCH_READ_INTR) {
+			fetch_cache_data(conn, start, total);
+			return -1;
 		} else if (rlen == FETCH_READ_ERROR) {
-			if (errno == EINTR)
-				fetch_cache_data(conn, start, total);
 			return -1;
 		}
 		FD_ZERO(&readfds);
@@ -441,6 +526,23 @@ fetch_read(void *ptr, size_t size, size_t nmemb, struct fetch_connect *conn)
 	return total;
 }
 
+size_t
+fetch_read(void *ptr, size_t size, size_t nmemb, struct fetch_connect *conn)
+{
+	ssize_t rlen;
+
+	rlen = fetch_read1(ptr, size, nmemb, conn);
+	if (rlen == -1) {
+		conn->iserr = 1;
+		return 0;
+	}
+	if (rlen == 0) {
+		conn->iseof = 1;
+		return 0;
+	}
+	return rlen;
+}
+
 #define MIN_BUF_SIZE 1024
 
 /*
@@ -450,8 +552,7 @@ char *
 fetch_getln(char *str, int size, struct fetch_connect *conn)
 {
 	size_t tmpsize;
-	ssize_t len;
-	char c;
+	int c;
 
 	if (conn->buf == NULL) {
 		if ((conn->buf = malloc(MIN_BUF_SIZE)) == NULL) {
@@ -472,14 +573,11 @@ fetch_getln(char *str, int size, struct fetch_connect *conn)
 	conn->bufpos = 0;
 	conn->buflen = 0;
 	do {
-		len = fetch_read(&c, sizeof(c), 1, conn);
-		if (len == -1) {
-			conn->iserr = 1;
-			return NULL;
-		}
-		if (len == 0) {
-			conn->iseof = 1;
-			break;
+		c = fetch_getc(conn);
+		if (c == EOF) {
+			if (fetch_error(conn))
+				return NULL;
+			break;	/* EOF */
 		}
 		conn->buf[conn->buflen++] = c;
 		if (conn->buflen == conn->bufsize) {
@@ -531,7 +629,7 @@ fetch_getline(struct fetch_connect *conn, char *buf, size_t buflen,
 	} else if (len == buflen - 1) {	/* line too long */
 		while (1) {
 			char c;
-			ssize_t rlen = fetch_read(&c, sizeof(c), 1, conn);
+			ssize_t rlen = fetch_read1(&c, 1, sizeof(c), conn);
 			if (rlen <= 0 || c == '\n')
 				break;
 		}
@@ -545,9 +643,10 @@ fetch_getline(struct fetch_connect *conn, char *buf, size_t buflen,
 	return len;
 }
 
-void *
+struct fetch_ssl *
 fetch_start_ssl(int sock, const char *servername)
 {
+	struct fetch_ssl *fssl;
 	SSL *ssl;
 	SSL_CTX *ctx;
 	int ret, ssl_err;
@@ -563,9 +662,17 @@ fetch_start_ssl(int sock, const char *servername)
 	ctx = SSL_CTX_new(SSLv23_client_method());
 	SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
 
+	fssl = calloc(1, sizeof(*fssl));
+	if (fssl == NULL) {
+		fprintf(ttyout, "SSL memory allocation failed\n");
+		SSL_CTX_free(ctx);
+		return NULL;
+	}
+
 	ssl = SSL_new(ctx);
 	if (ssl == NULL){
 		fprintf(ttyout, "SSL context creation failed\n");
+		free(fssl);
 		SSL_CTX_free(ctx);
 		return NULL;
 	}
@@ -581,6 +688,7 @@ fetch_start_ssl(int sock, const char *servername)
 		    ssl_err != SSL_ERROR_WANT_WRITE) {
 			ERR_print_errors_fp(ttyout);
 			SSL_free(ssl);
+			free(fssl);
 			return NULL;
 		}
 	}
@@ -603,12 +711,83 @@ fetch_start_ssl(int sock, const char *servername)
 		free(str);
 	}
 
-	return ssl;
+	fssl->ssl = ssl;
+	fssl->refcnt = 0;
+	return fssl;
 }
 
+int
+fetch_getc(struct fetch_connect *conn)
+{
+	ssize_t rlen;
+	char c;
+
+	rlen = fetch_read1(&c, 1, sizeof(c), conn);
+	if (rlen == -1) {
+		conn->iserr = 1;
+		return EOF;
+	}
+	if (rlen == 0) {
+		conn->iseof = 1;
+		return EOF;
+	}
+	return c;
+}
+
+int
+fetch_putc(int c, struct fetch_connect *conn)
+{
+	char buf[1];
+	int r;
+
+	buf[0] = c;
+	r = fetch_write(buf, 1, 1, conn);
+	if (r < 0)
+		return EOF;
+	return c;
+}
+
+ssize_t
+fetch_send(struct fetch_connect *conn, const void *msg, size_t len, int flags)
+{
+	struct iovec iov[1];
+
+	if (conn->ssl == NULL)
+		return send(fetch_fileno(conn), msg, len, flags);
+
+	iov[0].iov_base = __UNCONST(msg);
+	iov[0].iov_len = len;
+	return fetch_writev(conn, iov, 1);
+}
 
 void
-fetch_set_ssl(struct fetch_connect *conn, void *ssl)
+fetch_stop_ssl(struct fetch_ssl *ssl)
 {
-	conn->ssl = ssl;
+
+	if (ssl != NULL) {
+		SSL_free(ssl->ssl);
+		free(ssl);
+	}
+}
+
+void
+fetch_set_ssl(struct fetch_connect *conn, struct fetch_ssl *ssl)
+{
+
+	if (ssl != NULL) {
+		ssl->refcnt++;
+		conn->ssl = ssl;
+	}
+}
+
+void
+fetch_free_ssl(struct fetch_connect *conn)
+{
+
+	if (conn != NULL && conn->ssl != NULL) {
+		if (--conn->ssl->refcnt <= 0) {
+			fetch_stop_ssl(conn->ssl);
+			conn->ssl = NULL;
+		}
+	}
 }

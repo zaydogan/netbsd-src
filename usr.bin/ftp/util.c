@@ -124,6 +124,10 @@ setpeer(int argc, char *argv[])
 	}
 	if (gatemode)
 		port = gateport;
+#ifdef WITH_SSL
+	else if (ftpssl)
+		port = ftpsport;
+#endif
 	else
 		port = ftpport;
 	if (argc > 2)
@@ -184,6 +188,14 @@ parse_feat(const char *fline)
 		features[FEAT_SIZE] = 1;
 	else if (strcasecmp(fline, "TVFS") == 0)
 		features[FEAT_TVFS] = 1;
+#ifdef WITH_SSL
+	else if (strcasecmp(fline, "PBSZ") == 0)
+		features[FEAT_PBSZ] = 1;
+	else if (strcasecmp(fline, "PROT") == 0)
+		features[FEAT_PROT] = 1;
+	else if (strcasecmp(fline, "AUTH TLS") == 0)
+		features[FEAT_AUTH_TLS] = 1;
+#endif
 }
 
 /*
@@ -266,6 +278,11 @@ getremoteinfo(void)
 		DEBUG_FEAT(FEAT_REST_STREAM);
 		DEBUG_FEAT(FEAT_SIZE);
 		DEBUG_FEAT(FEAT_TVFS);
+#ifdef WITH_SSL
+		DEBUG_FEAT(FEAT_PBSZ);
+		DEBUG_FEAT(FEAT_PROT);
+		DEBUG_FEAT(FEAT_AUTH_TLS);
+#endif
 #undef DEBUG_FEAT
 	}
 #endif
@@ -285,7 +302,7 @@ cleanuppeer(void)
 {
 
 	if (cout)
-		(void)fclose(cout);
+		(void)fetch_close(cout);
 	cout = NULL;
 	connected = 0;
 	unix_server = 0;
@@ -333,8 +350,8 @@ lostpeer(int dummy)
 	alarmtimer(0);
 	if (connected) {
 		if (cout != NULL) {
-			(void)shutdown(fileno(cout), 1+1);
-			(void)fclose(cout);
+			(void)shutdown(fetch_fileno(cout), 1+1);
+			(void)fetch_close(cout);
 			cout = NULL;
 		}
 		if (data >= 0) {
@@ -347,8 +364,8 @@ lostpeer(int dummy)
 	pswitch(1);
 	if (connected) {
 		if (cout != NULL) {
-			(void)shutdown(fileno(cout), 1+1);
-			(void)fclose(cout);
+			(void)shutdown(fetch_fileno(cout), 1+1);
+			(void)fetch_close(cout);
 			cout = NULL;
 		}
 		connected = 0;
@@ -372,6 +389,11 @@ ftp_login(const char *host, const char *luser, const char *lpass)
 	char emptypass[] = "";
 	const char *errormsg;
 	int n, aflag, rval, nlen;
+#ifdef WITH_SSL
+	static const char *sslprot[] = { "TLS", "SSL" };
+	struct fetch_ssl *ssl;
+	size_t i;
+#endif
 
 	aflag = rval = 0;
 	fuser = pass = facct = NULL;
@@ -429,7 +451,34 @@ ftp_login(const char *host, const char *luser, const char *lpass)
 		fuser = nuser;
 	}
 
-	n = command("USER %s", fuser);
+	n = COMPLETE;
+#ifdef WITH_SSL
+	if (ftpssl && ftps_explicit) {
+		for (i = 0; i < sizeof(sslprot) / sizeof(sslprot[0]); i++) {
+			n = command("AUTH %s", sslprot[i]);
+			if (n == COMPLETE) {
+				ssl = fetch_start_ssl(fetch_fileno(cout), host);
+				if (ssl != NULL) {
+					fetch_set_ssl(cin, ssl);
+					fetch_set_ssl(cout, ssl);
+				} else
+					n = ERROR;
+				break;
+			} else if (n != TRANSIENT && n != ERROR) {
+				n = ERROR;
+				break;
+			}
+		}
+		if (n == COMPLETE) {
+			n = command("PBSZ 0");
+			if (n == COMPLETE) {
+				n = command("PROT P");
+			}
+		}
+	}
+#endif
+	if (n == COMPLETE)
+		n = command("USER %s", fuser);
 	if (n == CONTINUE) {
 		if (pass == NULL) {
 			p = getpass("Password: ");

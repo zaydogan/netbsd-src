@@ -152,6 +152,7 @@ main(int volatile argc, char **volatile argv)
 	ftpport = "ftp";
 	httpport = "http";
 #ifdef WITH_SSL
+	ftpsport = "ftps";
 	httpsport = "https";
 #endif
 	gateport = NULL;
@@ -200,6 +201,11 @@ main(int volatile argc, char **volatile argv)
 	family = AF_UNSPEC;
 #else
 	family = AF_INET;	/* force AF_INET if no INET6 support */
+#endif
+#ifdef WITH_SSL
+	ftpssl = 0;
+	ftps_explicit = 0;
+	ftps_fallback = 1;
 #endif
 
 	netrc[0] = '\0';
@@ -335,6 +341,9 @@ main(int volatile argc, char **volatile argv)
 			break;
 
 		case 'P':
+#ifdef WITH_SSL
+			ftpsport =
+#endif
 			ftpport = optarg;
 			break;
 
@@ -1055,6 +1064,10 @@ usage(void)
 "           [-r retry] [-s srcaddr] [-T dir,max[,inc]] [-x xferbufsize]\n"
 "           [[user@]host [port]] [host:path[/]] [file:///file]\n"
 "           [ftp://[user[:pass]@]host[:port]/path[/]]\n"
+#ifdef WITH_SSL
+"           [ftps://[user[:pass]@]host[:port]/path[/]]\n" /* Implicit */
+"           [ftpes://[user[:pass]@]host[:port]/path[/]]\n" /* Explicit */
+#endif
 "           [http://[user[:pass]@]host[:port]/path] [...]\n"
 #ifdef WITH_SSL
 "           [https://[user[:pass]@]host[:port]/path] [...]\n"

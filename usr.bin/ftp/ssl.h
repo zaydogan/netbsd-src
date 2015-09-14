@@ -25,39 +25,62 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#ifndef	FTP_SSL_H
+#define	FTP_SSL_H
+
 #ifdef WITH_SSL
+
+#include <stdarg.h>
 
 #define FETCH struct fetch_connect
 struct fetch_connect;
+struct fetch_ssl;
 
 int fetch_printf(struct fetch_connect *, const char *fmt, ...)
     __printflike(2, 3);
+int fetch_vprintf(struct fetch_connect *, const char *, va_list)
+    __printflike(2, 0);
 int fetch_fileno(struct fetch_connect *);
 int fetch_error(struct fetch_connect *);
+int fetch_eof(struct fetch_connect *);
 int fetch_flush(struct fetch_connect *);
 struct fetch_connect *fetch_open(const char *, const char *);
 struct fetch_connect *fetch_fdopen(int, const char *);
 int fetch_close(struct fetch_connect *);
-ssize_t fetch_read(void *, size_t, size_t, struct fetch_connect *);
+size_t fetch_write(void *, size_t, size_t, struct fetch_connect *);
+size_t fetch_read(void *, size_t, size_t, struct fetch_connect *);
 char *fetch_getln(char *, int, struct fetch_connect *);
 int fetch_getline(struct fetch_connect *, char *, size_t, const char **);
-void fetch_set_ssl(struct fetch_connect *, void *);
-void *fetch_start_ssl(int, const char *);
+void fetch_set_ssl(struct fetch_connect *, struct fetch_ssl *);
+struct fetch_ssl *fetch_start_ssl(int, const char *);
+int fetch_getc(struct fetch_connect *);
+int fetch_putc(int, struct fetch_connect *);
+ssize_t fetch_send(struct fetch_connect *, const void *, size_t, int);
+void fetch_free_ssl(struct fetch_connect *);
+void fetch_stop_ssl(struct fetch_ssl *);
 
 #else	/* !WITH_SSL */
 
 #define FETCH FILE
 
-#define	fetch_printf	fprintf
-#define	fetch_fileno	fileno
-#define	fetch_error	ferror
-#define	fetch_flush	fflush
-#define	fetch_open	fopen
-#define	fetch_fdopen	fdopen
-#define	fetch_close	fclose
-#define	fetch_read	fread
-#define	fetch_getln	fgets
-#define	fetch_getline	get_line
-#define	fetch_set_ssl(a, b)
+#define	fetch_printf		fprintf
+#define	fetch_vprintf		vfprintf
+#define	fetch_fileno		fileno
+#define	fetch_error		ferror
+#define	fetch_eof		feof
+#define	fetch_flush		fflush
+#define	fetch_open		fopen
+#define	fetch_fdopen		fdopen
+#define	fetch_close		fclose
+#define	fetch_write		fwrite
+#define	fetch_read		fread
+#define	fetch_getln		fgets
+#define	fetch_getline		get_line
+#define	fetch_getc		getc
+#define	fetch_putc		putc
+#define	fetch_send(f,m,l,fl)	send(fileno((f)),(m),(l),(fl))
 
-#endif	/* !WITH_SSL */
+#endif	/* WITH_SSL */
+
+#endif	/* FTP_SSL_H */

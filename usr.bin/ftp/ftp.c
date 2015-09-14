@@ -131,7 +131,7 @@ int	ptabflg;
 int	ptflag = 0;
 char	pasv[BUFSIZ];	/* passive port for proxy data connection */
 
-static int empty(FILE *, FILE *, int);
+static int empty(FETCH *, FETCH *, int);
 __dead static void abort_squared(int);
 
 struct sockinet {
@@ -164,6 +164,9 @@ hookup(const char *host, const char *port)
 	static char hostnamebuf[MAXHOSTNAMELEN];
 	socklen_t len;
 	int on = 1;
+#ifdef WITH_SSL
+	struct fetch_ssl *ssl = NULL;
+#endif
 
 	memset((char *)&hisctladdr, 0, sizeof (hisctladdr));
 	memset((char *)&myctladdr, 0, sizeof (myctladdr));
@@ -212,6 +215,9 @@ hookup(const char *host, const char *port)
 			}
 #endif
 		}
+#ifdef WITH_SSL
+ retry:
+#endif
 		s = socket(res->ai_family, SOCK_STREAM, res->ai_protocol);
 		if (s < 0) {
 			warn("Can't create socket for connection to `%s:%s'",
@@ -224,6 +230,21 @@ hookup(const char *host, const char *port)
 			s = -1;
 			continue;
 		}
+
+#ifdef WITH_SSL
+		if (ftpssl && !ftps_explicit) {
+			if ((ssl = fetch_start_ssl(s, hostnamebuf)) == NULL) {
+				close(s);
+				s = -1;
+				if (ftps_fallback) {
+					ftps_explicit = 1;
+					goto retry;
+				} else {
+					continue;
+				}
+			}
+		}
+#endif
 
 		/* finally we got one */
 		break;
@@ -258,24 +279,31 @@ hookup(const char *host, const char *port)
 		}
 	}
 #endif
-	cin = fdopen(s, "r");
-	cout = fdopen(s, "w");
+	cin = fetch_fdopen(s, "r");
+	cout = fetch_fdopen(s, "w");
 	if (cin == NULL || cout == NULL) {
 		warnx("Can't fdopen socket");
 		if (cin)
-			(void)fclose(cin);
+			(void)fetch_close(cin);
 		if (cout)
-			(void)fclose(cout);
+			(void)fetch_close(cout);
 		code = -1;
 		goto bad;
 	}
+#ifdef WITH_SSL
+	if (ftpssl && !ftps_explicit) {
+		fetch_set_ssl(cin, ssl);
+		fetch_set_ssl(cout, ssl);
+		ssl = NULL;
+	}
+#endif
 	if (verbose)
 		fprintf(ttyout, "Connected to %s.\n", hostname);
 	if (getreply(0) > 2) {	/* read startup message from server */
 		if (cin)
-			(void)fclose(cin);
+			(void)fetch_close(cin);
 		if (cout)
-			(void)fclose(cout);
+			(void)fetch_close(cout);
 		code = -1;
 		goto bad;
 	}
@@ -287,6 +315,9 @@ hookup(const char *host, const char *port)
 
 	return (hostname);
  bad:
+#ifdef WITH_SSL
+	fetch_stop_ssl(ssl);
+#endif
 	(void)close(s);
 	return (NULL);
 }
@@ -353,10 +384,10 @@ command(const char *fmt, ...)
 	oldsigint = xsignal(SIGINT, cmdabort);
 
 	va_start(ap, fmt);
-	vfprintf(cout, fmt, ap);
+	fetch_vprintf(cout, fmt, ap);
 	va_end(ap);
-	fputs("\r\n", cout);
-	(void)fflush(cout);
+	fetch_printf(cout, "%s", "\r\n");
+	(void)fetch_flush(cout);
 	cpend = 1;
 	r = getreply(!strcmp(fmt, "QUIT"));
 	if (abrtflag && oldsigint != SIG_IGN)
@@ -392,20 +423,22 @@ getreply(int expecteof)
 		dig = n = code = 0;
 		cp = current_line;
 		while (alarmtimer(quit_time ? quit_time : 60),
-		       ((c = getc(cin)) != '\n')) {
+		       ((c = fetch_getc(cin)) != '\n')) {
 			if (c == IAC) {     /* handle telnet commands */
-				switch (c = getc(cin)) {
+				switch (c = fetch_getc(cin)) {
 				case WILL:
 				case WONT:
-					c = getc(cin);
-					fprintf(cout, "%c%c%c", IAC, DONT, c);
-					(void)fflush(cout);
+					c = fetch_getc(cin);
+					fetch_printf(cout, "%c%c%c", IAC, DONT,
+					    c);
+					(void)fetch_flush(cout);
 					break;
 				case DO:
 				case DONT:
-					c = getc(cin);
-					fprintf(cout, "%c%c%c", IAC, WONT, c);
-					(void)fflush(cout);
+					c = fetch_getc(cin);
+					fetch_printf(cout, "%c%c%c", IAC, WONT,
+					    c);
+					(void)fetch_flush(cout);
 					break;
 				default:
 					break;
@@ -422,7 +455,7 @@ getreply(int expecteof)
 				int reply_abrtflag = abrtflag;
 
 				alarmtimer(0);
-				if (expecteof && feof(cin)) {
+				if (expecteof && fetch_eof(cin)) {
 					(void)xsignal(SIGINT, oldsigint);
 					(void)xsignal(SIGALRM, oldsigalrm);
 					code = 221;
@@ -520,19 +553,19 @@ getreply(int expecteof)
 }
 
 static int
-empty(FILE *ecin, FILE *din, int sec)
+empty(FETCH *ecin, FETCH *din, int sec)
 {
 	int		nr, nfd;
 	struct pollfd	pfd[2];
 
 	nfd = 0;
 	if (ecin) {
-		pfd[nfd].fd = fileno(ecin);
+		pfd[nfd].fd = fetch_fileno(ecin);
 		pfd[nfd++].events = POLLIN;
 	}
 
 	if (din) {
-		pfd[nfd].fd = fileno(din);
+		pfd[nfd].fd = fetch_fileno(din);
 		pfd[nfd++].events = POLLIN;
 	}
 
@@ -586,15 +619,16 @@ abortxfer(int notused)
  * In the case of error, errno contains the appropriate error code.
  */
 static int
-copy_bytes(int infd, int outfd, char *buf, size_t bufsize,
+copy_bytes(FETCH *infd, FETCH *outfd, char *buf, size_t bufsize,
 	int rate_limit, int hash_interval)
 {
 	volatile off_t	hashc;
-	ssize_t		inc, outc;
+	size_t		inc, outc;
 	char		*bufp;
 	struct timeval	tvthen, tvnow, tvdiff;
 	off_t		bufrem, bufchunk;
 	int		serr;
+	int		rv = 0;
 
 	hashc = hash_interval;
 	if (rate_limit)
@@ -611,16 +645,23 @@ copy_bytes(int infd, int outfd, char *buf, size_t bufsize,
 					/* copy bufchunk at a time */
 		bufrem = bufchunk;
 		while (bufrem > 0) {
-			inc = read(infd, buf, MIN((off_t)bufsize, bufrem));
-			if (inc <= 0)
+			inc = fetch_read(buf, 1, MIN((off_t)bufsize, bufrem),
+			    infd);
+			if (inc == 0) {
+				if (!fetch_eof(infd))
+					rv = 1;
 				goto copy_done;
+			}
 			bytes += inc;
 			bufrem -= inc;
 			bufp = buf;
 			while (inc > 0) {
-				outc = write(outfd, bufp, inc);
-				if (outc < 0)
+				outc = fetch_write(bufp, 1, inc, outfd);
+				if (outc == 0) {
+					if (fetch_error(outfd))
+						rv = 2;
 					goto copy_done;
+				}
 				inc -= outc;
 				bufp += outc;
 			}
@@ -652,12 +693,7 @@ copy_bytes(int infd, int outfd, char *buf, size_t bufsize,
 		(void)fflush(ttyout);
 	}
 	errno = serr;
-	if (inc == -1)
-		return 1;
-	if (outc == -1)
-		return 2;
-
-	return 0;
+	return rv;
 }
 
 void
@@ -667,7 +703,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 	struct stat st;
 	int c;
 	FILE *volatile fin;
-	FILE *volatile dout;
+	FETCH *volatile dout;
 	int (*volatile closefunc)(FILE *);
 	sigfunc volatile oldintr;
 	sigfunc volatile oldintp;
@@ -677,6 +713,10 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 	static size_t bufsize;
 	static char *buf;
 	int oprogress;
+#ifdef WITH_SSL
+	FETCH *volatile fin2;
+	int fdin;
+#endif
 
 	hashbytes = mark;
 	direction = "sent";
@@ -793,8 +833,22 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 
 	case TYPE_I:
 	case TYPE_L:
-		c = copy_bytes(fileno(fin), fileno(dout), buf, bufsize,
-			       rate_put, hash_interval);
+#ifdef WITH_SSL
+		c = 1;
+		fdin = dup(fileno(fin));
+		if (fdin >= 0) {
+			fin2 = fetch_fdopen(fdin, "r");
+			if (fin2 != NULL) {
+				c = copy_bytes(fin2, dout, buf, bufsize,
+				    rate_put, hash_interval);
+				fetch_close(fin2);
+			} else
+				close(fdin);
+		}
+#else /* !WITH_SSL */
+		c = copy_bytes(fin, dout, buf, bufsize, rate_put,
+		    hash_interval);
+#endif /* WITH_SSL */
 		if (c == 1) {
 			warn("Reading `%s'", local);
 		} else if (c == 2) {
@@ -812,16 +866,16 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 					(void)fflush(ttyout);
 					hashbytes += mark;
 				}
-				if (ferror(dout))
+				if (fetch_error(dout))
 					break;
-				(void)putc('\r', dout);
+				(void)fetch_putc('\r', dout);
 				bytes++;
 			}
-			(void)putc(c, dout);
+			(void)fetch_putc(c, dout);
 			bytes++;
 #if 0	/* this violates RFC 959 */
 			if (c == '\r') {
-				(void)putc('\0', dout);
+				(void)fetch_putc('\0', dout);
 				bytes++;
 			}
 #endif
@@ -833,7 +887,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 		}
 		if (ferror(fin))
 			warn("Reading `%s'", local);
-		if (ferror(dout)) {
+		if (fetch_error(dout)) {
 			if (errno != EPIPE)
 				warn("Writing to network");
 			bytes = -1;
@@ -846,7 +900,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 		(*closefunc)(fin);
 		fin = NULL;
 	}
-	(void)fclose(dout);
+	(void)fetch_close(dout);
 	dout = NULL;
 	(void)getreply(0);
 	if (bytes > 0)
@@ -865,7 +919,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 		data = -1;
 	}
 	if (dout) {
-		(void)fclose(dout);
+		(void)fetch_close(dout);
 		dout = NULL;
 	}
 	(void)getreply(0);
@@ -885,7 +939,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 	if (closefunc != NULL && fin != NULL)
 		(*closefunc)(fin);
 	if (dout)
-		(void)fclose(dout);
+		(void)fetch_close(dout);
 	progress = oprogress;
 	restart_point = 0;
 	bytes = 0;
@@ -893,10 +947,10 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 
 void
 recvrequest(const char *cmd, const char *volatile local, const char *remote,
-	    const char *lmode, int printnames, int ignorespecial)
+	    const char *volatile lmode, int printnames, int ignorespecial)
 {
 	FILE *volatile fout;
-	FILE *volatile din;
+	FETCH *volatile din;
 	int (*volatile closefunc)(FILE *);
 	sigfunc volatile oldintr;
 	sigfunc volatile oldintp;
@@ -913,6 +967,11 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 	struct timeval tval[2];
 	int oprogress;
 	int opreserve;
+#ifdef WITH_SSL
+	const char *fmode;
+	FETCH *volatile fout2;
+	int fdout;
+#endif
 
 	fout = NULL;
 	din = NULL;
@@ -1013,11 +1072,17 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 	if (din == NULL)
 		goto abort;
 	if (!ignorespecial && strcmp(local, "-") == 0) {
+#ifdef WITH_SSL
+		fmode = "w";
+#endif
 		fout = stdout;
 		progress = 0;
 		preserve = 0;
 	} else if (!ignorespecial && *local == '|') {
 		oldintp = xsignal(SIGPIPE, SIG_IGN);
+#ifdef WITH_SSL
+		fmode = "w";
+#endif
 		fout = popen(local + 1, "w");
 		if (fout == NULL) {
 			warn("Can't execute `%s'", local+1);
@@ -1027,6 +1092,9 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 		preserve = 0;
 		closefunc = pclose;
 	} else {
+#ifdef WITH_SSL
+		fmode = lmode;
+#endif
 		fout = fopen(local, lmode);
 		if (fout == NULL) {
 			warn("Can't open `%s'", local);
@@ -1059,8 +1127,22 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 			warn("Can't seek to restart `%s'", local);
 			goto cleanuprecv;
 		}
-		c = copy_bytes(fileno(din), fileno(fout), buf, bufsize,
-			       rate_get, hash_interval);
+#ifdef WITH_SSL
+		c = 2;
+		fdout = dup(fileno(fout));
+		if (fdout >= 0) {
+			fout2 = fetch_fdopen(fdout, fmode);
+			if (fout2 != NULL) {
+				c = copy_bytes(din, fout2, buf, bufsize,
+				    rate_get, hash_interval);
+				fetch_close(fout2);
+			} else
+				close(fdout);
+		}
+#else /* !WITH_SSL */
+		c = copy_bytes(din, fout, buf, bufsize, rate_get,
+		    hash_interval);
+#endif /* WITH_SSL */
 		if (c == 1) {
 			if (errno != EPIPE)
 				warn("Reading from network");
@@ -1089,7 +1171,7 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 				goto cleanuprecv;
 			}
 		}
-		while ((c = getc(din)) != EOF) {
+		while ((c = fetch_getc(din)) != EOF) {
 			if (c == '\n')
 				bare_lfs++;
 			while (c == '\r') {
@@ -1099,7 +1181,7 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 					hashbytes += mark;
 				}
 				bytes++;
-				if ((c = getc(din)) != '\n' || tcrflag) {
+				if ((c = fetch_getc(din)) != '\n' || tcrflag) {
 					if (ferror(fout))
 						goto break2;
 					(void)putc('\r', fout);
@@ -1121,7 +1203,7 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 				(void)putc('#', ttyout);
 			(void)putc('\n', ttyout);
 		}
-		if (ferror(din)) {
+		if (fetch_error(din)) {
 			if (errno != EPIPE)
 				warn("Reading from network");
 			bytes = -1;
@@ -1136,7 +1218,7 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 		(*closefunc)(fout);
 		fout = NULL;
 	}
-	(void)fclose(din);
+	(void)fetch_close(din);
 	din = NULL;
 	(void)getreply(0);
 	if (bare_lfs) {
@@ -1194,7 +1276,7 @@ recvrequest(const char *cmd, const char *volatile local, const char *remote,
 	if (closefunc != NULL && fout != NULL)
 		(*closefunc)(fout);
 	if (din)
-		(void)fclose(din);
+		(void)fetch_close(din);
 	progress = oprogress;
 	preserve = opreserve;
 	bytes = 0;
@@ -1660,7 +1742,7 @@ initconn(void)
 	return (1);
 }
 
-FILE *
+FETCH *
 dataconn(const char *lmode)
 {
 	struct sockinet	from;
@@ -1668,9 +1750,13 @@ dataconn(const char *lmode)
 	struct timeval	endtime, now, td;
 	struct pollfd	pfd[1];
 	socklen_t	fromlen;
+	FETCH		*conn;
+#ifdef WITH_SSL
+	struct fetch_ssl *ssl;
+#endif
 
 	if (passivemode)	/* passive data connection */
-		return (fdopen(data, lmode));
+		goto dataconn_open;
 
 				/* active mode data connection */
 
@@ -1728,7 +1814,27 @@ dataconn(const char *lmode)
 		}
 	}
 #endif
-	return (fdopen(data, lmode));
+ dataconn_open:
+#ifdef WITH_SSL
+	ssl = NULL;
+	if (ftpssl) {
+		if ((ssl = fetch_start_ssl(data, NULL)) == NULL) {
+			warn("SSL negotiation failed on data connection");
+			goto dataconn_failed;
+		}
+	}
+#endif
+	conn = fetch_fdopen(data, lmode);
+#ifdef WITH_SSL
+	if (ftpssl) {
+		if (conn == NULL) {
+			fetch_stop_ssl(ssl);
+			goto dataconn_failed;
+		}
+		fetch_set_ssl(conn, ssl);
+	}
+#endif
+	return conn;
 
  dataconn_failed:
 	(void)close(data);
@@ -1756,8 +1862,8 @@ pswitch(int flag)
 		char name[MAXHOSTNAMELEN];
 		struct sockinet mctl;
 		struct sockinet hctl;
-		FILE *in;
-		FILE *out;
+		FETCH *in;
+		FETCH *out;
 		int tpe;
 		int curtpe;
 		int cpnd;
@@ -2062,7 +2168,7 @@ abort_squared(int dummy)
 }
 
 void
-abort_remote(FILE *din)
+abort_remote(FETCH *din)
 {
 	char buf[BUFSIZ];
 	int nfnd;
@@ -2081,10 +2187,10 @@ abort_remote(FILE *din)
 	buf[0] = IAC;
 	buf[1] = IP;
 	buf[2] = IAC;
-	if (send(fileno(cout), buf, 3, MSG_OOB) != 3)
+	if (fetch_send(cout, buf, 3, MSG_OOB) != 3)
 		warn("Can't send abort message");
-	fprintf(cout, "%cABOR\r\n", DM);
-	(void)fflush(cout);
+	fetch_printf(cout, "%cABOR\r\n", DM);
+	(void)fetch_flush(cout);
 	if ((nfnd = empty(cin, din, 10)) <= 0) {
 		if (nfnd < 0)
 			warn("Can't send abort message");
@@ -2093,7 +2199,7 @@ abort_remote(FILE *din)
 		lostpeer(0);
 	}
 	if (din && (nfnd & 2)) {
-		while (read(fileno(din), buf, BUFSIZ) > 0)
+		while (fetch_read(buf, 1, BUFSIZ, din) > 0)
 			continue;
 	}
 	if (getreply(0) == ERROR && code == 552) {
