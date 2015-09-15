@@ -550,8 +550,11 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	time_t			mtime;
 	url_t			urltype;
 	in_port_t		portnum;
+	int			proxyauthdone;
 #ifdef WITH_SSL
 	struct fetch_ssl	*volatile ssl;
+	url_t			ourltype;
+	char			*ohost, *oport;
 #endif
 
 	DPRINTF("%s: `%s' proxyenv `%s'\n", __func__, url, STRorNULL(penv));
@@ -563,9 +566,13 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	s = -1;
 	savefile = NULL;
 	auth = location = message = NULL;
-	ischunked = isproxy = hcode = 0;
+	ischunked = isproxy = hcode = proxyauthdone = 0;
 	rval = 1;
 	uuser = pass = host = path = decodedpath = puser = ppass = NULL;
+#ifdef WITH_SSL
+	ourltype = UNKNOWN_URL_T;
+	ohost = oport = NULL;
+#endif
 
 	if (sigsetjmp(httpabort, 1))
 		goto cleanup_fetch_url;
@@ -573,6 +580,13 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	if (parse_url(url, "URL", &urltype, &uuser, &pass, &host, &port,
 	    &portnum, &path) == -1)
 		goto cleanup_fetch_url;
+#ifdef WITH_SSL
+	if (urltype == HTTPS_URL_T) {
+		ourltype = urltype;
+		ohost = host;
+		oport = port;
+	}
+#endif
 
 	if (urltype == FILE_URL_T && ! EMPTYSTRING(host)
 	    && strcasecmp(host, "localhost") != 0) {
@@ -742,8 +756,14 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 					goto cleanup_fetch_url;
 				}
 
+#ifdef WITH_SSL
+				if (ohost != host)
+#endif
 				FREEPTR(host);
 				host = phost;
+#ifdef WITH_SSL
+				if (oport != port)
+#endif
 				FREEPTR(port);
 				port = pport;
 				FREEPTR(path);
@@ -869,10 +889,168 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 				leading = ", ";
 				hasleading++;
 			}
+#ifdef WITH_SSL
+			if (ourltype == HTTPS_URL_T) {
+				if (strchr(ohost, ':')) {
+					char *h, *p;
+
+					/*
+					 * strip off IPv6 scope identifier,
+					 * since it is local to the node
+					 */
+					h = ftp_strdup(ohost);
+					if (isipv6addr(h) &&
+					    (p = strchr(h, '%')) != NULL) {
+						*p = '\0';
+					}
+					fetch_printf(fin,
+					    "CONNECT [%s]:%s HTTP/1.1\r\n",
+					    h, oport);
+					fetch_printf(fin, "Host: [%s]:%s\r\n",
+					    h, oport);
+					free(h);
+				} else {
+					fetch_printf(fin,
+					    "CONNECT %s:%s HTTP/1.1\r\n",
+					    ohost, oport);
+					fetch_printf(fin, "Host: %s:%s\r\n",
+					    ohost, oport);
+				}
+				useragent = getenv("FTPUSERAGENT");
+				if (useragent != NULL) {
+					fetch_printf(fin, "User-Agent: %s\r\n",
+					    useragent);
+				} else {
+					fetch_printf(fin,
+					    "User-Agent: %s/%s\r\n",
+					    FTP_PRODUCT, FTP_VERSION);
+				}
+				if (proxyauth) {
+					if (verbose) {
+						fprintf(ttyout,
+						    "%swith proxy authorization"
+						    , leading);
+						leading = ", ";
+						hasleading++;
+					}
+					fetch_printf(fin,
+					    "Proxy-Authorization: %s\r\n",
+					    proxyauth);
+				}
+				if (verbose && hasleading)
+					fputs(")\n", ttyout);
+				leading = "  (";
+				hasleading = 0;
+				fetch_printf(fin, "\r\n");
+				if (fetch_flush(fin) == EOF) {
+					warn("Writing HTTP request");
+					alarmtimer(0);
+					goto cleanup_fetch_url;
+				}
+				alarmtimer(0);
+
+				/* Read the response */
+				alarmtimer(quit_time ? quit_time : 60);
+				len = fetch_getline(fin, buf, sizeof(buf),
+				    &errormsg);
+				alarmtimer(0);
+				if (len < 0) {
+					if (*errormsg == '\n')
+						errormsg++;
+					warnx("Receiving HTTP reply: %s",
+					    errormsg);
+					goto cleanup_fetch_url;
+				}
+				while (len > 0 && (ISLWS(buf[len-1])))
+					buf[--len] = '\0';
+				DPRINTF("%s: received `%s'\n", __func__, buf);
+
+				/* Determine HTTP response code */
+				cp = strchr(buf, ' ');
+				if (cp == NULL)
+					goto improper;
+				else
+					cp++;
+				hcode = strtol(cp, &ep, 10);
+				if (*ep != '\0' && !isspace((unsigned char)*ep))
+					goto improper;
+				message = ftp_strdup(cp);
+
+				while (1) {
+					alarmtimer(quit_time ? quit_time : 60);
+					len = fetch_getline(fin, buf,
+					    sizeof(buf), &errormsg);
+					alarmtimer(0);
+					if (len < 0) {
+						if (*errormsg == '\n')
+							errormsg++;
+						warnx("Receiving HTTP reply: %s"
+						    , errormsg);
+						goto cleanup_fetch_url;
+					}
+					while (len > 0 && (ISLWS(buf[len-1])))
+						buf[--len] = '\0';
+					if (len == 0)
+						break;
+					DPRINTF("%s: received `%s'\n",
+					    __func__, buf);
+
+					if (match_token(&cp,
+					    "Proxy-Authenticate:")) {
+						if (!(token = match_token(&cp,
+						    "Basic"))) {
+							DPRINTF("%s: skipping "
+							    "unknown auth "
+							    "scheme `%s'\n",
+							    __func__, token);
+							continue;
+						}
+						FREEPTR(auth);
+						auth = ftp_strdup(token);
+						DPRINTF("%s: parsed auth as "
+						    "`%s'\n", __func__, cp);
+						proxyauthdone = 1;
+					}
+				}
+
+				/* finished parsing header */
+				switch (hcode) {
+				case 200:
+					break;
+				default:
+					if (message)
+						warnx("Error proxy connect "
+						    "`%s'", message);
+					else
+						warnx("Unknown error proxy "
+						    "connect");
+					goto cleanup_fetch_url;
+				}
+
+				if ((ssl = fetch_start_ssl(s, host)) == NULL)
+					goto cleanup_fetch_url;
+				fetch_set_ssl(fin, ssl);
+				ssl = NULL;
+
+				urltype = ourltype;
+				if (host != ohost) {
+					FREEPTR(host);
+					host = ohost;
+				}
+				if (port != oport) {
+					FREEPTR(port);
+					port = oport;
+				}
+				goto no_proxy;
+			}
+#endif
 			fetch_printf(fin, "GET %s HTTP/1.0\r\n", path);
 			if (flushcache)
 				fetch_printf(fin, "Pragma: no-cache\r\n");
 		} else {
+#ifdef WITH_SSL
+no_proxy:
+#endif
 			fetch_printf(fin, "GET %s HTTP/1.1\r\n", path);
 			if (strchr(host, ':')) {
 				char *h, *p;
@@ -927,7 +1105,7 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 			}
 			fetch_printf(fin, "Authorization: %s\r\n", wwwauth);
 		}
-		if (proxyauth) {
+		if (proxyauth && !proxyauthdone) {
 			if (verbose) {
 				fprintf(ttyout,
 				    "%swith proxy authorization", leading);
@@ -1445,6 +1623,12 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	if (pass != NULL)
 		memset(pass, 0, strlen(pass));
 	FREEPTR(pass);
+#ifdef WITH_SSL
+	if (host != ohost)
+		FREEPTR(ohost);
+	if (port != oport)
+		FREEPTR(oport);
+#endif
 	FREEPTR(host);
 	FREEPTR(port);
 	FREEPTR(path);
