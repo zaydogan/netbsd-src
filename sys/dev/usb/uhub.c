@@ -116,6 +116,8 @@ struct uhub_softc {
 	int			 sc_explorepending;
 
 	u_char			 sc_running;
+
+	struct sysctllog	*sc_clog;
 };
 
 #define UHUB_IS_HIGH_SPEED(sc) \
@@ -127,7 +129,8 @@ struct uhub_softc {
 
 Static usbd_status uhub_explore(struct usbd_device *);
 Static void uhub_intr(struct usbd_xfer *, void *, usbd_status);
-
+Static int uhub_sysctl_port_power(SYSCTLFN_PROTO);
+Static int uhub_sysctl_port_reset(SYSCTLFN_PROTO);
 
 /*
  * We need two attachment points:
@@ -262,6 +265,8 @@ uhub_attach(device_t parent, device_t self, void *aux)
 	struct usbd_interface *iface;
 	usb_endpoint_descriptor_t *ed;
 	struct usbd_tt *tts = NULL;
+	const struct sysctlnode *rnode, *cnode, *node;
+	int error;
 
 	UHUBHIST_FUNC(); UHUBHIST_CALLED();
 
@@ -449,6 +454,58 @@ uhub_attach(device_t parent, device_t self, void *aux)
 	if (dev->ud_powersrc->up_parent != NULL)
 		usbd_delay_ms(dev, pwrdly);
 
+	/* Port power */
+	if ((dev->ud_hub->uh_hubdesc.wHubCharacteristics[0] & UHD_PWR) >=
+	    UHD_PWR_NO_SWITCH)
+		goto sysctl_done;
+	if ((error = sysctl_createv(&sc->sc_clog, 0, NULL, &rnode,
+	    CTLFLAG_PERMANENT, CTLTYPE_NODE, "uhub",
+	    SYSCTL_DESCR("uhub global controls"),
+	    NULL, 0, NULL, 0, CTL_HW, CTL_CREATE, CTL_EOL)) != 0) {
+		aprint_normal_dev(sc->sc_dev,
+		    "couldn't create uhub global sysctl node\n");
+		goto sysctl_done;
+	}
+	if ((error = sysctl_createv(&sc->sc_clog, 0, &rnode, &rnode,
+	    0, CTLTYPE_NODE, device_xname(self),
+	    SYSCTL_DESCR("per uhub controls"),
+	    NULL, 0, NULL, 0, CTL_CREATE, CTL_EOL)) != 0) {
+		aprint_normal_dev(sc->sc_dev,
+		    "couldn't create uhub sysctl node\n");
+		goto sysctl_done;
+	}
+	for (port = 1; port <= nports; port++) {
+		char buf[8];
+		snprintf(buf, sizeof(buf), "port%d", port);
+		if ((error = sysctl_createv(&sc->sc_clog, 0, &rnode, &cnode,
+		    0, CTLTYPE_NODE, buf,
+		    SYSCTL_DESCR("uhub port controls"),
+		    NULL, 0, NULL, 0, port, CTL_EOL)) != 0) {
+			aprint_normal_dev(sc->sc_dev,
+			    "couldn't create uhub port sysctl node\n");
+			goto sysctl_done;
+		}
+		if ((error = sysctl_createv(&sc->sc_clog, 0, &cnode, &node,
+		    CTLFLAG_READWRITE, CTLTYPE_INT, "power",
+		    SYSCTL_DESCR("uhub port power control"),
+		    uhub_sysctl_port_power, 0, (void *)sc, 0,
+		    CTL_CREATE, CTL_EOL)) != 0) {
+			aprint_normal_dev(sc->sc_dev,
+			    "couldn't create uhub port power sysctl node\n");
+			goto sysctl_done;
+		}
+		if ((error = sysctl_createv(&sc->sc_clog, 0, &cnode, &node,
+		    CTLFLAG_READWRITE, CTLTYPE_INT, "reset",
+		    SYSCTL_DESCR("uhub port reset control"),
+		    uhub_sysctl_port_reset, 0, (void *)sc, 0,
+		    CTL_CREATE, CTL_EOL)) != 0) {
+			aprint_normal_dev(sc->sc_dev,
+			    "couldn't create uhub port reset sysctl node\n");
+			goto sysctl_done;
+		}
+	}
+sysctl_done:
+
 	/* The usual exploration will finish the setup. */
 
 	sc->sc_running = 1;
@@ -459,6 +516,7 @@ uhub_attach(device_t parent, device_t self, void *aux)
 	return;
 
  bad:
+	sysctl_teardown(&sc->sc_clog);
 	if (sc->sc_status)
 		kmem_free(sc->sc_status, sc->sc_statuslen);
 	if (sc->sc_statuspend)
@@ -815,6 +873,8 @@ uhub_detach(device_t self, int flags)
 	/* XXXSMP usb */
 	KERNEL_LOCK(1, curlwp);
 
+	sysctl_teardown(&sc->sc_clog);
+
 	nports = hub->uh_hubdesc.bNbrPorts;
 	for (port = 0; port < nports; port++) {
 		rup = &hub->uh_ports[port];
@@ -959,4 +1019,84 @@ uhub_intr(struct usbd_xfer *xfer, void *addr, usbd_status status)
 		}
 		mutex_exit(&sc->sc_lock);
 	}
+}
+
+Static int
+uhub_sysctl_port_power(SYSCTLFN_ARGS)
+{
+	struct sysctlnode node;
+	struct sysctlnode *pnode;
+	struct uhub_softc *sc;
+	usb_port_status_t status;
+	usbd_status err;
+	int t, port, error;
+
+	node = *rnode;
+	sc = node.sysctl_data;
+
+	pnode = rnode->sysctl_parent;
+	if (pnode == NULL)
+		return 0;
+	port = pnode->sysctl_num;
+	err = usbd_get_port_status(sc->sc_hub, port, &status);
+	if (err) {
+		DPRINTF("uhub %d get port stat failed, err %d",
+		    device_unit(sc->sc_dev), err, 0, 0);
+		return EINVAL;
+	}
+
+	t = (UGETW(status.wPortStatus) & UPS_PORT_POWER) ? 1 : 0;
+	node.sysctl_data = &t;
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error || newp == NULL)
+		return error;
+
+	if (t) {
+		err = usbd_set_port_feature(sc->sc_hub, port, UHF_PORT_POWER);
+		if (err)
+			aprint_error_dev(sc->sc_dev, "port %d power on failed, %s\n",
+			    port, usbd_errstr(err));
+	} else {
+		err = usbd_clear_port_feature(sc->sc_hub, port, UHF_PORT_POWER);
+		if (err)
+			aprint_error_dev(sc->sc_dev, "port %d power off failed, %s\n",
+			    port, usbd_errstr(err));
+	}
+
+	return (err == USBD_NORMAL_COMPLETION) ? 0 : EINVAL;
+}
+
+Static int
+uhub_sysctl_port_reset(SYSCTLFN_ARGS)
+{
+	struct sysctlnode node;
+	struct sysctlnode *pnode;
+	struct uhub_softc *sc;
+	usbd_status err;
+	int t, port, error;
+
+	node = *rnode;
+	sc = node.sysctl_data;
+
+	t = 0;
+	node.sysctl_data = &t;
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error || newp == NULL)
+		return error;
+
+	pnode = node.sysctl_parent;
+	if (pnode == NULL)
+		return 0;
+	port = pnode->sysctl_num;
+
+	if (t) {
+		err = usbd_set_port_feature(sc->sc_hub, port, UHF_PORT_RESET);
+		if (err) {
+			aprint_error_dev(sc->sc_dev, "port %d power on failed, %s\n",
+			    port, usbd_errstr(err));
+			return EINVAL;
+		}
+	}
+
+	return 0;
 }
