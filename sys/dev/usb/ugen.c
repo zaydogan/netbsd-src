@@ -57,10 +57,13 @@ __KERNEL_RCSID(0, "$NetBSD: ugen.c,v 1.139 2018/03/05 09:35:01 ws Exp $");
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/poll.h>
+#include <sys/sysctl.h>
+#include <sys/mutex.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
+#include <dev/usb/usbdivar.h>
 
 #ifdef UGEN_DEBUG
 #define DPRINTF(x)	if (ugendebug) printf x
@@ -196,20 +199,58 @@ CFATTACH_DECL_NEW(ugenif, sizeof(struct ugen_softc), ugenif_match,
 /* toggle to control attach priority. -1 means "let autoconf decide" */
 int ugen_override = -1;
 
+/* forced attach ugen device */
+struct ugen_forced_attach {
+	struct usb_devno dev;
+#define	USB_VENDOR_ANY	0xffff
+	int addr;
+};
+static struct ugen_forced_attach *ugen_forced_attach_tbl;
+static int ugen_forced_attach_num;
+static kmutex_t ugen_forced_attach_mtx;
+static int ugen_forced_attach_vendor = USB_VENDOR_ANY;
+static int ugen_forced_attach_product = USB_PRODUCT_ANY;
+static int ugen_forced_attach_addr = -1;
+
 int
 ugen_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
-	int override;
+	struct ugen_forced_attach *ufa;
+	int override, i;
 
 	if (ugen_override != -1)
 		override = ugen_override;
 	else
 		override = match->cf_flags & 1;
-
 	if (override)
 		return UMATCH_HIGHEST;
-	else if (uaa->uaa_usegeneric)
+
+	mutex_enter(&ugen_forced_attach_mtx);
+	if (ugen_forced_attach_tbl != NULL) {
+		for (i = 0; i < ugen_forced_attach_num; i++) {
+			ufa = &ugen_forced_attach_tbl[i];
+			if (ufa->dev.ud_vendor == USB_VENDOR_ANY &&
+			    ufa->dev.ud_product == USB_PRODUCT_ANY &&
+			    ufa->addr == -1)
+				continue;
+
+			if ((ufa->dev.ud_vendor == USB_VENDOR_ANY ||
+			     ufa->dev.ud_vendor == uaa->uaa_vendor) &&
+			    (ufa->dev.ud_product == USB_PRODUCT_ANY ||
+			     ufa->dev.ud_product == uaa->uaa_product) &&
+			    (ufa->addr == -1 ||
+			     ufa->addr == uaa->uaa_device->ud_addr))
+				break;
+		}
+		if (i < ugen_forced_attach_num) {
+			mutex_exit(&ugen_forced_attach_mtx);
+			return UMATCH_HIGHEST;
+		}
+	}
+	mutex_exit(&ugen_forced_attach_mtx);
+
+	if (uaa->uaa_usegeneric)
 		return UMATCH_GENERIC;
 	else
 		return UMATCH_NONE;
@@ -2155,4 +2196,248 @@ ugenkqfilter(dev_t dev, struct knote *kn)
 	mutex_exit(&sc->sc_lock);
 
 	return 0;
+}
+
+/*
+ * hw.ugen sysctl
+ */
+static int ugen_forced_attach_operation(SYSCTLFN_ARGS);
+static int ugen_forced_attach_list(SYSCTLFN_ARGS);
+
+SYSCTL_SETUP(sysctl_hw_ugen_setup, "sysctl hw.ugen setup")
+{
+	int err;
+	const struct sysctlnode *rnode;
+	const struct sysctlnode *tnode;
+	const struct sysctlnode *cnode;
+
+	err = sysctl_createv(clog, 0, NULL, &rnode,
+	    CTLFLAG_PERMANENT, CTLTYPE_NODE, "ugen",
+	    SYSCTL_DESCR("ugen global controls"),
+	    NULL, 0, NULL, 0, CTL_HW, CTL_CREATE, CTL_EOL);
+	if (err)
+		goto fail;
+
+	/* override control */
+	err = sysctl_createv(clog, 0, &rnode, &cnode,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_INT,
+	    "override", SYSCTL_DESCR("override control"),
+	    NULL, 0,
+	    &ugen_override, sizeof(ugen_override), CTL_CREATE, CTL_EOL);
+	if (err)
+		goto fail;
+
+	/* forced attach control */
+	mutex_init(&ugen_forced_attach_mtx, MUTEX_DEFAULT, IPL_NONE);
+
+	err = sysctl_createv(clog, 0, &rnode, &tnode,
+	    CTLFLAG_PERMANENT, CTLTYPE_NODE,
+	    "forced_attach", SYSCTL_DESCR("forced attach controls"),
+	    NULL, 0, NULL, 0, CTL_CREATE, CTL_EOL);
+	if (err)
+		goto fail;
+	err = sysctl_createv(clog, 0, &tnode, &cnode,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_INT,
+	    "vendor", SYSCTL_DESCR("vendor"),
+	    NULL, 0,
+	    &ugen_forced_attach_vendor, sizeof(ugen_forced_attach_vendor),
+	    CTL_CREATE, CTL_EOL);
+	if (err)
+		goto fail;
+	err = sysctl_createv(clog, 0, &tnode, &cnode,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_INT,
+	    "product", SYSCTL_DESCR("product"),
+	    NULL, 0,
+	    &ugen_forced_attach_product, sizeof(ugen_forced_attach_product),
+	    CTL_CREATE, CTL_EOL);
+	if (err)
+		goto fail;
+	err = sysctl_createv(clog, 0, &tnode, &cnode,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_INT,
+	    "addr", SYSCTL_DESCR("addr"),
+	    NULL, 0,
+	    &ugen_forced_attach_addr, sizeof(ugen_forced_attach_addr),
+	    CTL_CREATE, CTL_EOL);
+	if (err)
+		goto fail;
+	err = sysctl_createv(clog, 0, &tnode, &cnode,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_INT,
+	    "add", SYSCTL_DESCR("Add a forced attach entry"),
+	    ugen_forced_attach_operation, 0, (void *)1, 0, CTL_CREATE, CTL_EOL);
+	if (err)
+		goto fail;
+	err = sysctl_createv(clog, 0, &tnode, &cnode,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_INT,
+	    "delete", SYSCTL_DESCR("Delete a forced attach entry"),
+	    ugen_forced_attach_operation, 0, (void *)2, 0, CTL_CREATE, CTL_EOL);
+	if (err)
+		goto fail;
+	err = sysctl_createv(clog, 0, &tnode, &cnode,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_INT,
+	    "clear", SYSCTL_DESCR("Clear a forced attach entry"),
+	    ugen_forced_attach_operation, 0, (void *)3, 0, CTL_CREATE, CTL_EOL);
+	if (err)
+		goto fail;
+	err = sysctl_createv(clog, 0, &tnode, &cnode,
+	    CTLFLAG_PERMANENT|CTLFLAG_READWRITE, CTLTYPE_STRUCT,
+	    "list", SYSCTL_DESCR("Get all forced attach entries"),
+	    ugen_forced_attach_list, 0, NULL, 0, CTL_CREATE, CTL_EOL);
+	if (err)
+		goto fail;
+
+	return;
+fail:
+	aprint_error("%s: sysctl_createv failed (err = %d)\n", __func__, err);
+}
+
+static int
+ugen_forced_attach_operation(SYSCTLFN_ARGS)
+{
+	struct sysctlnode node;
+	struct ugen_forced_attach *ufa;
+	long op;
+	int i, t, error;
+	bool do_check = true;
+
+	node = *rnode;
+	op = (long)node.sysctl_data;
+
+	t = 0;
+	node.sysctl_data = &t;
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error || newp == NULL)
+		return (error);
+
+	if (t == 0)
+		return (0);
+
+	switch (op) {
+	case 1:	/* add */
+	case 2:	/* delete */
+		break;
+
+	case 3:	/* clear */
+		do_check = false;
+		break;
+
+	default:
+		return (EINVAL);
+	}
+
+	error = EINVAL;
+	mutex_enter(&ugen_forced_attach_mtx);
+
+	if (do_check) {
+		if (ugen_forced_attach_vendor <= 0 ||
+		     ugen_forced_attach_vendor > 0xffff)
+			goto out;
+		if (ugen_forced_attach_product <= 0 ||
+		     ugen_forced_attach_product > 0xffff)
+			goto out;
+		if (ugen_forced_attach_addr != -1 &&
+		    (ugen_forced_attach_addr < 0 ||
+		     ugen_forced_attach_addr > 0xff))
+			goto out;
+		if (ugen_forced_attach_vendor == USB_VENDOR_ANY &&
+		    ugen_forced_attach_product == USB_PRODUCT_ANY &&
+		    ugen_forced_attach_addr == -1)
+			goto out;
+	}
+
+	ufa = NULL;
+	if (do_check && ugen_forced_attach_tbl != NULL) {
+		for (i = 0; i < ugen_forced_attach_num; i++) {
+			ufa = &ugen_forced_attach_tbl[i];
+			if (ufa->dev.ud_vendor == ugen_forced_attach_vendor &&
+			    ufa->dev.ud_product == ugen_forced_attach_product &&
+			    ufa->addr == ugen_forced_attach_addr)
+				break;
+		}
+		if (i == ugen_forced_attach_num)
+			ufa = NULL;
+	}
+	if (op == 1 && ufa == NULL) {
+		/* Grow the table */
+		ufa = kmem_alloc(sizeof(*ufa) * (ugen_forced_attach_num + 1),
+		    KM_NOSLEEP);
+		if (ufa == NULL) {
+			error = ENOMEM;
+			goto out;
+		}
+
+		if (ugen_forced_attach_tbl != NULL)
+			memcpy(ufa, ugen_forced_attach_tbl,
+			    sizeof(*ufa) * ugen_forced_attach_num);
+		ugen_forced_attach_tbl = ufa;
+
+		ufa = &ugen_forced_attach_tbl[ugen_forced_attach_num];
+		ufa->dev.ud_vendor = ugen_forced_attach_vendor;
+		ufa->dev.ud_product = ugen_forced_attach_product;
+		ufa->addr = ugen_forced_attach_addr;
+		ugen_forced_attach_num++;
+	} else if (op == 2 && ufa != NULL) {
+		/* Wipe an entry. no shrink the table. */
+		ufa->dev.ud_vendor = USB_VENDOR_ANY;
+		ufa->dev.ud_product = USB_PRODUCT_ANY;
+		ufa->addr = -1;
+	} else if (op == 3 && ugen_forced_attach_tbl != NULL) {
+		/* Drop the table. */
+		kmem_free(ugen_forced_attach_tbl,
+		    sizeof(*ufa) * ugen_forced_attach_num);
+		ugen_forced_attach_tbl = NULL;
+		ugen_forced_attach_num = 0;
+	}
+
+	/* Reset parameters */
+	ugen_forced_attach_vendor = USB_VENDOR_ANY;
+	ugen_forced_attach_product = USB_PRODUCT_ANY;
+	ugen_forced_attach_addr = -1;
+
+	error = 0;
+ out:
+	mutex_exit(&ugen_forced_attach_mtx);
+
+	return (error);
+}
+
+static int
+ugen_forced_attach_list(SYSCTLFN_ARGS)
+{
+	struct ugen_forced_attach *ufa;
+	size_t buflen;
+	int error;
+
+	if (oldp == NULL) {
+		mutex_enter(&ugen_forced_attach_mtx);
+		*oldlenp = sizeof(*ufa) * ugen_forced_attach_num;
+		mutex_exit(&ugen_forced_attach_mtx);
+		return (0);
+	}
+	if (*oldlenp == 0)
+		return (0);
+
+	ufa = kmem_alloc(*oldlenp, KM_SLEEP);
+	if (ufa == NULL)
+		return (ENOMEM);
+
+	error = 0;
+	mutex_enter(&ugen_forced_attach_mtx);
+
+	buflen = sizeof(*ufa) * ugen_forced_attach_num;
+	if (*oldlenp < buflen) {
+		error = ENOMEM;
+		goto out;
+	}
+	if (ugen_forced_attach_tbl != NULL)
+		memcpy(ufa, ugen_forced_attach_tbl, buflen);
+
+ out:
+	mutex_exit(&ugen_forced_attach_mtx);
+
+	if (error == 0 && buflen > 0)
+		error = sysctl_copyout(l, ufa, oldp, buflen);
+	kmem_free(ufa, *oldlenp);
+	*oldlenp = buflen;
+
+	return (error);
 }

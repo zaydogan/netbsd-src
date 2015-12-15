@@ -1031,6 +1031,8 @@ uhub_sysctl_port_power(SYSCTLFN_ARGS)
 	usbd_status err;
 	int t, port, error;
 
+	UHUBHIST_FUNC(); UHUBHIST_CALLED();
+
 	node = *rnode;
 	sc = node.sysctl_data;
 
@@ -1054,13 +1056,15 @@ uhub_sysctl_port_power(SYSCTLFN_ARGS)
 	if (t) {
 		err = usbd_set_port_feature(sc->sc_hub, port, UHF_PORT_POWER);
 		if (err)
-			aprint_error_dev(sc->sc_dev, "port %d power on failed, %s\n",
-			    port, usbd_errstr(err));
+			aprint_error_dev(sc->sc_dev,
+			    "port %d power on failed, %s\n", port,
+			    usbd_errstr(err));
 	} else {
 		err = usbd_clear_port_feature(sc->sc_hub, port, UHF_PORT_POWER);
 		if (err)
-			aprint_error_dev(sc->sc_dev, "port %d power off failed, %s\n",
-			    port, usbd_errstr(err));
+			aprint_error_dev(sc->sc_dev,
+			    "port %d power off failed, %s\n", port,
+			    usbd_errstr(err));
 	}
 
 	return (err == USBD_NORMAL_COMPLETION) ? 0 : EINVAL;
@@ -1074,6 +1078,8 @@ uhub_sysctl_port_reset(SYSCTLFN_ARGS)
 	struct uhub_softc *sc;
 	usbd_status err;
 	int t, port, error;
+
+	UHUBHIST_FUNC(); UHUBHIST_CALLED();
 
 	node = *rnode;
 	sc = node.sysctl_data;
@@ -1092,8 +1098,9 @@ uhub_sysctl_port_reset(SYSCTLFN_ARGS)
 	if (t) {
 		err = usbd_set_port_feature(sc->sc_hub, port, UHF_PORT_RESET);
 		if (err) {
-			aprint_error_dev(sc->sc_dev, "port %d power on failed, %s\n",
-			    port, usbd_errstr(err));
+			aprint_error_dev(sc->sc_dev,
+			    "port %d power on failed, %s\n", port,
+			    usbd_errstr(err));
 			return EINVAL;
 		}
 	}

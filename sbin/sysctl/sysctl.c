@@ -168,6 +168,7 @@ static void kern_cp_id(HANDLER_PROTO);
 static void kern_drivers(HANDLER_PROTO);
 static void vm_loadavg(HANDLER_PROTO);
 static void proc_limit(HANDLER_PROTO);
+static void ugen_forced_attach(HANDLER_PROTO);
 #ifdef CPU_DISKINFO
 static void machdep_diskinfo(HANDLER_PROTO);
 #endif /* CPU_DISKINFO */
@@ -230,6 +231,7 @@ static const struct handlespec {
 	{ "/net/ns/spp/deb.*",			printother, NULL, "trsp" },
 
 	{ "/hw/diskstats",			printother, NULL, "iostat" },
+	{ "/hw/ugen/forced_attach/list",	ugen_forced_attach, NULL, NULL },
 
 #ifdef CPU_CONSDEV
 	{ "/machdep/consdev",			kern_consdev, NULL, NULL },
@@ -2567,6 +2569,56 @@ proc_limit(HANDLER_ARGS)
 			display_string(pnode, sname, "unlimited", 10,
 				       DISPLAY_NEW);
 	}
+}
+
+/*ARGSUSED*/
+static void
+ugen_forced_attach(HANDLER_ARGS)
+{
+	struct ugen_forced_attach {
+		struct {
+			uint16_t vendor;
+			uint16_t product;
+		} dev;
+		int addr;
+	} *ufa;
+	size_t sz, i;
+	int rc;
+	const char *comma;
+
+	rc = prog_sysctl(name, namelen, NULL, &sz, NULL, 0);
+	if (rc == -1) {
+		sysctlerror(1);
+		return;
+	}
+
+	if (sz % sizeof(*ufa))
+		err(EXIT_FAILURE,
+		    "bad size %zu for hw.ugen.forced_attach.list", sz);
+
+	ufa = malloc(sz);
+	if (ufa == NULL) {
+		sysctlerror(1);
+		return;
+	}
+
+	rc = prog_sysctl(name, namelen, ufa, &sz, NULL, 0);
+	if (rc == -1) {
+		sysctlerror(1);
+		free(ufa);
+		return;
+	}
+
+	comma = "";
+	if (!nflag)
+		printf("%s%s", sname, eq);
+	for (i = 0, sz /= sizeof(*ufa); i < sz; i++) {
+		(void)printf("%s[0x%04x 0x%04x %d]", comma, ufa[i].dev.vendor,
+		    ufa[i].dev.product, ufa[i].addr);
+		comma = ", ";
+	}
+	(void)printf("\n");
+	free(ufa);
 }
 
 #ifdef CPU_DISKINFO
