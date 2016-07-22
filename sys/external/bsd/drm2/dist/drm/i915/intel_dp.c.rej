@@ -1,0 +1,742 @@
+--- i915/intel_dp.c	2016-07-22 15:48:08.000000000 +0900
++++ i915/intel_dp.c	2016-07-12 01:31:24.000000000 +0900
+@@ -28,7 +28,10 @@
+ #include <linux/i2c.h>
+ #include <linux/slab.h>
+ #include <linux/export.h>
++#include <linux/notifier.h>
++#include <linux/reboot.h>
+ #include <drm/drmP.h>
++#include <drm/drm_atomic_helper.h>
+ #include <drm/drm_crtc.h>
+ #include <drm/drm_crtc_helper.h>
+ #include <drm/drm_edid.h>
+@@ -255,82 +286,296 @@ unpack_aux(uint32_t src, uint8_t *dst, i
+ 		dst[i] = src >> ((3-i) * 8);
+ }
+ 
+-/* hrawclock is 1/4 the FSB frequency */
+-static int
+-intel_hrawclk(struct drm_device *dev)
++static void
++intel_dp_init_panel_power_sequencer(struct drm_device *dev,
++				    struct intel_dp *intel_dp);
++static void
++intel_dp_init_panel_power_sequencer_registers(struct drm_device *dev,
++					      struct intel_dp *intel_dp);
++
++static void pps_lock(struct intel_dp *intel_dp)
+ {
++	struct intel_digital_port *intel_dig_port = dp_to_dig_port(intel_dp);
++	struct intel_encoder *encoder = &intel_dig_port->base;
++	struct drm_device *dev = encoder->base.dev;
+ 	struct drm_i915_private *dev_priv = dev->dev_private;
+-	uint32_t clkcfg;
++	enum intel_display_power_domain power_domain;
+ 
+-	/* There is no CLKCFG reg in Valleyview. VLV hrawclk is 200 MHz */
+-	if (IS_VALLEYVIEW(dev))
+-		return 200;
++	/*
++	 * See vlv_power_sequencer_reset() why we need
++	 * a power domain reference here.
++	 */
++	power_domain = intel_display_port_aux_power_domain(encoder);
++	intel_display_power_get(dev_priv, power_domain);
+ 
+-	clkcfg = I915_READ(CLKCFG);
+-	switch (clkcfg & CLKCFG_FSB_MASK) {
+-	case CLKCFG_FSB_400:
+-		return 100;
+-	case CLKCFG_FSB_533:
+-		return 133;
+-	case CLKCFG_FSB_667:
+-		return 166;
+-	case CLKCFG_FSB_800:
+-		return 200;
+-	case CLKCFG_FSB_1067:
+-		return 266;
+-	case CLKCFG_FSB_1333:
+-		return 333;
+-	/* these two are just a guess; one of them might be right */
+-	case CLKCFG_FSB_1600:
+-	case CLKCFG_FSB_1600_ALT:
+-		return 400;
+-	default:
+-		return 133;
+-	}
++	mutex_lock(&dev_priv->pps_mutex);
++}
++
++static void pps_unlock(struct intel_dp *intel_dp)
++{
++	struct intel_digital_port *intel_dig_port = dp_to_dig_port(intel_dp);
++	struct intel_encoder *encoder = &intel_dig_port->base;
++	struct drm_device *dev = encoder->base.dev;
++	struct drm_i915_private *dev_priv = dev->dev_private;
++	enum intel_display_power_domain power_domain;
++
++	mutex_unlock(&dev_priv->pps_mutex);
++
++	power_domain = intel_display_port_aux_power_domain(encoder);
++	intel_display_power_put(dev_priv, power_domain);
+ }
+ 
+ static void
+-intel_dp_init_panel_power_sequencer(struct drm_device *dev,
+-				    struct intel_dp *intel_dp,
+-				    struct edp_power_seq *out);
+-static void
+-intel_dp_init_panel_power_sequencer_registers(struct drm_device *dev,
+-					      struct intel_dp *intel_dp,
+-					      struct edp_power_seq *out);
++vlv_power_sequencer_kick(struct intel_dp *intel_dp)
++{
++	struct intel_digital_port *intel_dig_port = dp_to_dig_port(intel_dp);
++	struct drm_device *dev = intel_dig_port->base.base.dev;
++	struct drm_i915_private *dev_priv = dev->dev_private;
++	enum pipe pipe = intel_dp->pps_pipe;
++	bool pll_enabled, release_cl_override = false;
++	enum dpio_phy phy = DPIO_PHY(pipe);
++	enum dpio_channel ch = vlv_pipe_to_channel(pipe);
++	uint32_t DP;
++
++	if (WARN(I915_READ(intel_dp->output_reg) & DP_PORT_EN,
++		 "skipping pipe %c power seqeuncer kick due to port %c being active\n",
++		 pipe_name(pipe), port_name(intel_dig_port->port)))
++		return;
++
++	DRM_DEBUG_KMS("kicking pipe %c power sequencer for port %c\n",
++		      pipe_name(pipe), port_name(intel_dig_port->port));
++
++	/* Preserve the BIOS-computed detected bit. This is
++	 * supposed to be read-only.
++	 */
++	DP = I915_READ(intel_dp->output_reg) & DP_DETECTED;
++	DP |= DP_VOLTAGE_0_4 | DP_PRE_EMPHASIS_0;
++	DP |= DP_PORT_WIDTH(1);
++	DP |= DP_LINK_TRAIN_PAT_1;
++
++	if (IS_CHERRYVIEW(dev))
++		DP |= DP_PIPE_SELECT_CHV(pipe);
++	else if (pipe == PIPE_B)
++		DP |= DP_PIPEB_SELECT;
++
++	pll_enabled = I915_READ(DPLL(pipe)) & DPLL_VCO_ENABLE;
++
++	/*
++	 * The DPLL for the pipe must be enabled for this to work.
++	 * So enable temporarily it if it's not already enabled.
++	 */
++	if (!pll_enabled) {
++		release_cl_override = IS_CHERRYVIEW(dev) &&
++			!chv_phy_powergate_ch(dev_priv, phy, ch, true);
++
++		vlv_force_pll_on(dev, pipe, IS_CHERRYVIEW(dev) ?
++				 &chv_dpll[0].dpll : &vlv_dpll[0].dpll);
++	}
++
++	/*
++	 * Similar magic as in intel_dp_enable_port().
++	 * We _must_ do this port enable + disable trick
++	 * to make this power seqeuencer lock onto the port.
++	 * Otherwise even VDD force bit won't work.
++	 */
++	I915_WRITE(intel_dp->output_reg, DP);
++	POSTING_READ(intel_dp->output_reg);
++
++	I915_WRITE(intel_dp->output_reg, DP | DP_PORT_EN);
++	POSTING_READ(intel_dp->output_reg);
++
++	I915_WRITE(intel_dp->output_reg, DP & ~DP_PORT_EN);
++	POSTING_READ(intel_dp->output_reg);
++
++	if (!pll_enabled) {
++		vlv_force_pll_off(dev, pipe);
++
++		if (release_cl_override)
++			chv_phy_powergate_ch(dev_priv, phy, ch, false);
++	}
++}
+ 
+ static enum pipe
+ vlv_power_sequencer_pipe(struct intel_dp *intel_dp)
+ {
+ 	struct intel_digital_port *intel_dig_port = dp_to_dig_port(intel_dp);
+-	struct drm_crtc *crtc = intel_dig_port->base.base.crtc;
+ 	struct drm_device *dev = intel_dig_port->base.base.dev;
+ 	struct drm_i915_private *dev_priv = dev->dev_private;
+-	enum port port = intel_dig_port->port;
++	struct intel_encoder *encoder;
++	unsigned int pipes = (1 << PIPE_A) | (1 << PIPE_B);
+ 	enum pipe pipe;
+ 
+-	/* modeset should have pipe */
+-	if (crtc)
+-		return to_intel_crtc(crtc)->pipe;
++	lockdep_assert_held(&dev_priv->pps_mutex);
++
++	/* We should never land here with regular DP ports */
++	WARN_ON(!is_edp(intel_dp));
++
++	if (intel_dp->pps_pipe != INVALID_PIPE)
++		return intel_dp->pps_pipe;
++
++	/*
++	 * We don't have power sequencer currently.
++	 * Pick one that's not used by other ports.
++	 */
++	list_for_each_entry(encoder, &dev->mode_config.encoder_list,
++			    base.head) {
++		struct intel_dp *tmp;
++
++		if (encoder->type != INTEL_OUTPUT_EDP)
++			continue;
++
++		tmp = enc_to_intel_dp(&encoder->base);
++
++		if (tmp->pps_pipe != INVALID_PIPE)
++			pipes &= ~(1 << tmp->pps_pipe);
++	}
++
++	/*
++	 * Didn't find one. This should not happen since there
++	 * are two power sequencers and up to two eDP ports.
++	 */
++	if (WARN_ON(pipes == 0))
++		pipe = PIPE_A;
++	else
++		pipe = ffs(pipes) - 1;
++
++	vlv_steal_power_sequencer(dev, pipe);
++	intel_dp->pps_pipe = pipe;
++
++	DRM_DEBUG_KMS("picked pipe %c power sequencer for port %c\n",
++		      pipe_name(intel_dp->pps_pipe),
++		      port_name(intel_dig_port->port));
++
++	/* init power sequencer on this pipe and port */
++	intel_dp_init_panel_power_sequencer(dev, intel_dp);
++	intel_dp_init_panel_power_sequencer_registers(dev, intel_dp);
++
++	/*
++	 * Even vdd force doesn't work until we've made
++	 * the power sequencer lock in on the port.
++	 */
++	vlv_power_sequencer_kick(intel_dp);
++
++	return intel_dp->pps_pipe;
++}
++
++typedef bool (*vlv_pipe_check)(struct drm_i915_private *dev_priv,
++			       enum pipe pipe);
++
++static bool vlv_pipe_has_pp_on(struct drm_i915_private *dev_priv,
++			       enum pipe pipe)
++{
++	return I915_READ(VLV_PIPE_PP_STATUS(pipe)) & PP_ON;
++}
++
++static bool vlv_pipe_has_vdd_on(struct drm_i915_private *dev_priv,
++				enum pipe pipe)
++{
++	return I915_READ(VLV_PIPE_PP_CONTROL(pipe)) & EDP_FORCE_VDD;
++}
++
++static bool vlv_pipe_any(struct drm_i915_private *dev_priv,
++			 enum pipe pipe)
++{
++	return true;
++}
++
++static enum pipe
++vlv_initial_pps_pipe(struct drm_i915_private *dev_priv,
++		     enum port port,
++		     vlv_pipe_check pipe_check)
++{
++	enum pipe pipe;
+ 
+-	/* init time, try to find a pipe with this port selected */
+ 	for (pipe = PIPE_A; pipe <= PIPE_B; pipe++) {
+ 		u32 port_sel = I915_READ(VLV_PIPE_PP_ON_DELAYS(pipe)) &
+ 			PANEL_PORT_SELECT_MASK;
+-		if (port_sel == PANEL_PORT_SELECT_DPB_VLV && port == PORT_B)
+-			return pipe;
+-		if (port_sel == PANEL_PORT_SELECT_DPC_VLV && port == PORT_C)
+-			return pipe;
++
++		if (port_sel != PANEL_PORT_SELECT_VLV(port))
++			continue;
++
++		if (!pipe_check(dev_priv, pipe))
++			continue;
++
++		return pipe;
++	}
++
++	return INVALID_PIPE;
++}
++
++static void
++vlv_initial_power_sequencer_setup(struct intel_dp *intel_dp)
++{
++	struct intel_digital_port *intel_dig_port = dp_to_dig_port(intel_dp);
++	struct drm_device *dev = intel_dig_port->base.base.dev;
++	struct drm_i915_private *dev_priv = dev->dev_private;
++	enum port port = intel_dig_port->port;
++
++	lockdep_assert_held(&dev_priv->pps_mutex);
++
++	/* try to find a pipe with this port selected */
++	/* first pick one where the panel is on */
++	intel_dp->pps_pipe = vlv_initial_pps_pipe(dev_priv, port,
++						  vlv_pipe_has_pp_on);
++	/* didn't find one? pick one where vdd is on */
++	if (intel_dp->pps_pipe == INVALID_PIPE)
++		intel_dp->pps_pipe = vlv_initial_pps_pipe(dev_priv, port,
++							  vlv_pipe_has_vdd_on);
++	/* didn't find one? pick one with just the correct port */
++	if (intel_dp->pps_pipe == INVALID_PIPE)
++		intel_dp->pps_pipe = vlv_initial_pps_pipe(dev_priv, port,
++							  vlv_pipe_any);
++
++	/* didn't find one? just let vlv_power_sequencer_pipe() pick one when needed */
++	if (intel_dp->pps_pipe == INVALID_PIPE) {
++		DRM_DEBUG_KMS("no initial power sequencer for port %c\n",
++			      port_name(port));
++		return;
+ 	}
+ 
+-	/* shrug */
+-	return PIPE_A;
++	DRM_DEBUG_KMS("initial power sequencer for port %c: pipe %c\n",
++		      port_name(port), pipe_name(intel_dp->pps_pipe));
++
++	intel_dp_init_panel_power_sequencer(dev, intel_dp);
++	intel_dp_init_panel_power_sequencer_registers(dev, intel_dp);
++}
++
++void vlv_power_sequencer_reset(struct drm_i915_private *dev_priv)
++{
++	struct drm_device *dev = dev_priv->dev;
++	struct intel_encoder *encoder;
++
++	if (WARN_ON(!IS_VALLEYVIEW(dev)))
++		return;
++
++	/*
++	 * We can't grab pps_mutex here due to deadlock with power_domain
++	 * mutex when power_domain functions are called while holding pps_mutex.
++	 * That also means that in order to use pps_pipe the code needs to
++	 * hold both a power domain reference and pps_mutex, and the power domain
++	 * reference get/put must be done while _not_ holding pps_mutex.
++	 * pps_{lock,unlock}() do these steps in the correct order, so one
++	 * should use them always.
++	 */
++
++	list_for_each_entry(encoder, &dev->mode_config.encoder_list, base.head) {
++		struct intel_dp *intel_dp;
++
++		if (encoder->type != INTEL_OUTPUT_EDP)
++			continue;
++
++		intel_dp = enc_to_intel_dp(&encoder->base);
++		intel_dp->pps_pipe = INVALID_PIPE;
++	}
+ }
+ 
+ static u32 _pp_ctrl_reg(struct intel_dp *intel_dp)
+ {
+ 	struct drm_device *dev = intel_dp_to_dev(intel_dp);
+ 
+-	if (HAS_PCH_SPLIT(dev))
++	if (IS_BROXTON(dev))
++		return BXT_PP_CONTROL(0);
++	else if (HAS_PCH_SPLIT(dev))
+ 		return PCH_PP_CONTROL;
+ 	else
+ 		return VLV_PIPE_PP_CONTROL(vlv_power_sequencer_pipe(intel_dp));
+@@ -885,72 +1269,327 @@ intel_dp_connector_unregister(struct int
+ {
+ 	struct intel_dp *intel_dp = intel_attached_dp(&intel_connector->base);
+ 
+-	sysfs_remove_link(&intel_connector->base.kdev->kobj,
+-			  intel_dp->aux.ddc.dev.kobj.name);
++	if (!intel_connector->mst_port)
++		sysfs_remove_link(&intel_connector->base.kdev->kobj,
++				  intel_dp->aux.ddc.dev.kobj.name);
+ 	intel_connector_unregister(intel_connector);
+ }
+ 
+ static void
+-intel_dp_set_clock(struct intel_encoder *encoder,
+-		   struct intel_crtc_config *pipe_config, int link_bw)
++skl_edp_set_pll_config(struct intel_crtc_state *pipe_config)
+ {
+-	struct drm_device *dev = encoder->base.dev;
+-	const struct dp_link_dpll *divisor = NULL;
+-	int i, count = 0;
++	u32 ctrl1;
+ 
+-	if (IS_G4X(dev)) {
+-		divisor = gen4_dpll;
+-		count = ARRAY_SIZE(gen4_dpll);
+-	} else if (IS_HASWELL(dev)) {
+-		/* Haswell has special-purpose DP DDI clocks. */
+-	} else if (HAS_PCH_SPLIT(dev)) {
+-		divisor = pch_dpll;
+-		count = ARRAY_SIZE(pch_dpll);
+-	} else if (IS_VALLEYVIEW(dev)) {
+-		divisor = vlv_dpll;
+-		count = ARRAY_SIZE(vlv_dpll);
+-	}
++	memset(&pipe_config->dpll_hw_state, 0,
++	       sizeof(pipe_config->dpll_hw_state));
++
++	pipe_config->ddi_pll_sel = SKL_DPLL0;
++	pipe_config->dpll_hw_state.cfgcr1 = 0;
++	pipe_config->dpll_hw_state.cfgcr2 = 0;
++
++	ctrl1 = DPLL_CTRL1_OVERRIDE(SKL_DPLL0);
++	switch (pipe_config->port_clock / 2) {
++	case 81000:
++		ctrl1 |= DPLL_CTRL1_LINK_RATE(DPLL_CTRL1_LINK_RATE_810,
++					      SKL_DPLL0);
++		break;
++	case 135000:
++		ctrl1 |= DPLL_CTRL1_LINK_RATE(DPLL_CTRL1_LINK_RATE_1350,
++					      SKL_DPLL0);
++		break;
++	case 270000:
++		ctrl1 |= DPLL_CTRL1_LINK_RATE(DPLL_CTRL1_LINK_RATE_2700,
++					      SKL_DPLL0);
++		break;
++	case 162000:
++		ctrl1 |= DPLL_CTRL1_LINK_RATE(DPLL_CTRL1_LINK_RATE_1620,
++					      SKL_DPLL0);
++		break;
++	/* TBD: For DP link rates 2.16 GHz and 4.32 GHz, VCO is 8640 which
++	results in CDCLK change. Need to handle the change of CDCLK by
++	disabling pipes and re-enabling them */
++	case 108000:
++		ctrl1 |= DPLL_CTRL1_LINK_RATE(DPLL_CTRL1_LINK_RATE_1080,
++					      SKL_DPLL0);
++		break;
++	case 216000:
++		ctrl1 |= DPLL_CTRL1_LINK_RATE(DPLL_CTRL1_LINK_RATE_2160,
++					      SKL_DPLL0);
++		break;
+ 
+-	if (divisor && count) {
+-		for (i = 0; i < count; i++) {
+-			if (link_bw == divisor[i].link_bw) {
+-				pipe_config->dpll = divisor[i].dpll;
+-				pipe_config->clock_set = true;
+-				break;
+-			}
+-		}
+ 	}
++	pipe_config->dpll_hw_state.ctrl1 = ctrl1;
+ }
+ 
+-bool
+-intel_dp_compute_config(struct intel_encoder *encoder,
+-			struct intel_crtc_config *pipe_config)
++void
++hsw_dp_set_ddi_pll_sel(struct intel_crtc_state *pipe_config)
+ {
+-	struct drm_device *dev = encoder->base.dev;
+-	struct drm_i915_private *dev_priv = dev->dev_private;
+-	struct drm_display_mode *adjusted_mode = &pipe_config->adjusted_mode;
+-	struct intel_dp *intel_dp = enc_to_intel_dp(&encoder->base);
+-	enum port port = dp_to_dig_port(intel_dp)->port;
+-	struct intel_crtc *intel_crtc = encoder->new_crtc;
+-	struct intel_connector *intel_connector = intel_dp->attached_connector;
++	memset(&pipe_config->dpll_hw_state, 0,
++	       sizeof(pipe_config->dpll_hw_state));
++
++	switch (pipe_config->port_clock / 2) {
++	case 81000:
++		pipe_config->ddi_pll_sel = PORT_CLK_SEL_LCPLL_810;
++		break;
++	case 135000:
++		pipe_config->ddi_pll_sel = PORT_CLK_SEL_LCPLL_1350;
++		break;
++	case 270000:
++		pipe_config->ddi_pll_sel = PORT_CLK_SEL_LCPLL_2700;
++		break;
++	}
++}
++
++static int
++intel_dp_sink_rates(struct intel_dp *intel_dp, const int **sink_rates)
++{
++	if (intel_dp->num_sink_rates) {
++		*sink_rates = intel_dp->sink_rates;
++		return intel_dp->num_sink_rates;
++	}
++
++	*sink_rates = default_rates;
++
++	return (intel_dp_max_link_bw(intel_dp) >> 3) + 1;
++}
++
++static bool intel_dp_source_supports_hbr2(struct drm_device *dev)
++{
++	/* WaDisableHBR2:skl */
++	if (IS_SKYLAKE(dev) && INTEL_REVID(dev) <= SKL_REVID_B0)
++		return false;
++
++	if ((IS_HASWELL(dev) && !IS_HSW_ULX(dev)) || IS_BROADWELL(dev) ||
++	    (INTEL_INFO(dev)->gen >= 9))
++		return true;
++	else
++		return false;
++}
++
++static int
++intel_dp_source_rates(struct drm_device *dev, const int **source_rates)
++{
++	int size;
++
++	if (IS_BROXTON(dev)) {
++		*source_rates = bxt_rates;
++		size = ARRAY_SIZE(bxt_rates);
++	} else if (IS_SKYLAKE(dev)) {
++		*source_rates = skl_rates;
++		size = ARRAY_SIZE(skl_rates);
++	} else {
++		*source_rates = default_rates;
++		size = ARRAY_SIZE(default_rates);
++	}
++
++	/* This depends on the fact that 5.4 is last value in the array */
++	if (!intel_dp_source_supports_hbr2(dev))
++		size--;
++
++	return size;
++}
++
++static void
++intel_dp_set_clock(struct intel_encoder *encoder,
++		   struct intel_crtc_state *pipe_config)
++{
++	struct drm_device *dev = encoder->base.dev;
++	const struct dp_link_dpll *divisor = NULL;
++	int i, count = 0;
++
++	if (IS_G4X(dev)) {
++		divisor = gen4_dpll;
++		count = ARRAY_SIZE(gen4_dpll);
++	} else if (HAS_PCH_SPLIT(dev)) {
++		divisor = pch_dpll;
++		count = ARRAY_SIZE(pch_dpll);
++	} else if (IS_CHERRYVIEW(dev)) {
++		divisor = chv_dpll;
++		count = ARRAY_SIZE(chv_dpll);
++	} else if (IS_VALLEYVIEW(dev)) {
++		divisor = vlv_dpll;
++		count = ARRAY_SIZE(vlv_dpll);
++	}
++
++	if (divisor && count) {
++		for (i = 0; i < count; i++) {
++			if (pipe_config->port_clock == divisor[i].clock) {
++				pipe_config->dpll = divisor[i].dpll;
++				pipe_config->clock_set = true;
++				break;
++			}
++		}
++	}
++}
++
++static int intersect_rates(const int *source_rates, int source_len,
++			   const int *sink_rates, int sink_len,
++			   int *common_rates)
++{
++	int i = 0, j = 0, k = 0;
++
++	while (i < source_len && j < sink_len) {
++		if (source_rates[i] == sink_rates[j]) {
++			if (WARN_ON(k >= DP_MAX_SUPPORTED_RATES))
++				return k;
++			common_rates[k] = source_rates[i];
++			++k;
++			++i;
++			++j;
++		} else if (source_rates[i] < sink_rates[j]) {
++			++i;
++		} else {
++			++j;
++		}
++	}
++	return k;
++}
++
++static int intel_dp_common_rates(struct intel_dp *intel_dp,
++				 int *common_rates)
++{
++	struct drm_device *dev = intel_dp_to_dev(intel_dp);
++	const int *source_rates, *sink_rates;
++	int source_len, sink_len;
++
++	sink_len = intel_dp_sink_rates(intel_dp, &sink_rates);
++	source_len = intel_dp_source_rates(dev, &source_rates);
++
++	return intersect_rates(source_rates, source_len,
++			       sink_rates, sink_len,
++			       common_rates);
++}
++
++static void snprintf_int_array(char *str, size_t len,
++			       const int *array, int nelem)
++{
++	int i;
++
++	str[0] = '\0';
++
++	for (i = 0; i < nelem; i++) {
++		int r = snprintf(str, len, "%s%d", i ? ", " : "", array[i]);
++		if (r >= len)
++			return;
++		str += r;
++		len -= r;
++	}
++}
++
++static void intel_dp_print_rates(struct intel_dp *intel_dp)
++{
++	struct drm_device *dev = intel_dp_to_dev(intel_dp);
++	const int *source_rates, *sink_rates;
++	int source_len, sink_len, common_len;
++	int common_rates[DP_MAX_SUPPORTED_RATES];
++	char str[128]; /* FIXME: too big for stack? */
++
++	if ((drm_debug & DRM_UT_KMS) == 0)
++		return;
++
++	source_len = intel_dp_source_rates(dev, &source_rates);
++	snprintf_int_array(str, sizeof(str), source_rates, source_len);
++	DRM_DEBUG_KMS("source rates: %s\n", str);
++
++	sink_len = intel_dp_sink_rates(intel_dp, &sink_rates);
++	snprintf_int_array(str, sizeof(str), sink_rates, sink_len);
++	DRM_DEBUG_KMS("sink rates: %s\n", str);
++
++	common_len = intel_dp_common_rates(intel_dp, common_rates);
++	snprintf_int_array(str, sizeof(str), common_rates, common_len);
++	DRM_DEBUG_KMS("common rates: %s\n", str);
++}
++
++static int rate_to_index(int find, const int *rates)
++{
++	int i = 0;
++
++	for (i = 0; i < DP_MAX_SUPPORTED_RATES; ++i)
++		if (find == rates[i])
++			break;
++
++	return i;
++}
++
++int
++intel_dp_max_link_rate(struct intel_dp *intel_dp)
++{
++	int rates[DP_MAX_SUPPORTED_RATES] = {};
++	int len;
++
++	len = intel_dp_common_rates(intel_dp, rates);
++	if (WARN_ON(len <= 0))
++		return 162000;
++
++	return rates[rate_to_index(0, rates) - 1];
++}
++
++int intel_dp_rate_select(struct intel_dp *intel_dp, int rate)
++{
++	return rate_to_index(rate, intel_dp->sink_rates);
++}
++
++static void intel_dp_compute_rate(struct intel_dp *intel_dp, int port_clock,
++				  uint8_t *link_bw, uint8_t *rate_select)
++{
++	if (intel_dp->num_sink_rates) {
++		*link_bw = 0;
++		*rate_select =
++			intel_dp_rate_select(intel_dp, port_clock);
++	} else {
++		*link_bw = drm_dp_link_rate_to_bw_code(port_clock);
++		*rate_select = 0;
++	}
++}
++
++bool
++intel_dp_compute_config(struct intel_encoder *encoder,
++			struct intel_crtc_state *pipe_config)
++{
++	struct drm_device *dev = encoder->base.dev;
++	struct drm_i915_private *dev_priv = dev->dev_private;
++	struct drm_display_mode *adjusted_mode = &pipe_config->base.adjusted_mode;
++	struct intel_dp *intel_dp = enc_to_intel_dp(&encoder->base);
++	enum port port = dp_to_dig_port(intel_dp)->port;
++	struct intel_crtc *intel_crtc = to_intel_crtc(pipe_config->base.crtc);
++	struct intel_connector *intel_connector = intel_dp->attached_connector;
+ 	int lane_count, clock;
+ 	int min_lane_count = 1;
+ 	int max_lane_count = intel_dp_max_lane_count(intel_dp);
+ 	/* Conveniently, the link BW constants become indices with a shift...*/
+ 	int min_clock = 0;
+-	int max_clock = intel_dp_max_link_bw(intel_dp) >> 3;
++	int max_clock;
+ 	int bpp, mode_rate;
+-	static int bws[] = { DP_LINK_BW_1_62, DP_LINK_BW_2_7, DP_LINK_BW_5_4 };
+ 	int link_avail, link_clock;
++	int common_rates[DP_MAX_SUPPORTED_RATES] = {};
++	int common_len;
++	uint8_t link_bw, rate_select;
++
++	common_len = intel_dp_common_rates(intel_dp, common_rates);
++
++	/* No common link rates between source and sink */
++	WARN_ON(common_len <= 0);
++
++	max_clock = common_len - 1;
+ 
+ 	if (HAS_PCH_SPLIT(dev) && !HAS_DDI(dev) && port != PORT_A)
+ 		pipe_config->has_pch_encoder = true;
+ 
+ 	pipe_config->has_dp_encoder = true;
++	pipe_config->has_drrs = false;
++	pipe_config->has_audio = intel_dp->has_audio && port != PORT_A;
+ 
+ 	if (is_edp(intel_dp) && intel_connector->panel.fixed_mode) {
+ 		intel_fixed_panel_mode(intel_connector->panel.fixed_mode,
+ 				       adjusted_mode);
++
++		if (INTEL_INFO(dev)->gen >= 9) {
++			int ret;
++			ret = skl_update_scaler_crtc(pipe_config);
++			if (ret)
++				return ret;
++		}
++
+ 		if (!HAS_PCH_SPLIT(dev))
+ 			intel_gmch_panel_fitting(intel_crtc, pipe_config,
+ 						 intel_connector->panel.fitting_mode);
+@@ -5524,11 +7776,14 @@ intel_dp_init_connector(struct intel_dig
+ 	struct drm_device *dev = intel_encoder->base.dev;
+ 	struct drm_i915_private *dev_priv = dev->dev_private;
+ 	enum port port = intel_dig_port->port;
+-	struct edp_power_seq power_seq = { 0 };
+ 	int type;
+ 
++	intel_dp->pps_pipe = INVALID_PIPE;
++
+ 	/* intel_dp vfuncs */
+-	if (IS_VALLEYVIEW(dev))
++	if (INTEL_INFO(dev)->gen >= 9)
++		intel_dp->get_aux_clock_divider = skl_get_aux_clock_divider;
++	else if (IS_VALLEYVIEW(dev))
+ 		intel_dp->get_aux_clock_divider = vlv_get_aux_clock_divider;
+ 	else if (IS_HASWELL(dev) || IS_BROADWELL(dev))
+ 		intel_dp->get_aux_clock_divider = hsw_get_aux_clock_divider;

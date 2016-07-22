@@ -1,0 +1,33 @@
+--- radeon/radeon_mode.h	2016-07-22 15:48:08.000000000 +0900
++++ radeon/radeon_mode.h	2016-07-12 01:31:24.000000000 +0900
+@@ -984,12 +1067,29 @@ void dce8_program_fmt(struct drm_encoder
+ int radeon_fbdev_init(struct radeon_device *rdev);
+ void radeon_fbdev_fini(struct radeon_device *rdev);
+ void radeon_fbdev_set_suspend(struct radeon_device *rdev, int state);
+-int radeon_fbdev_total_size(struct radeon_device *rdev);
+ bool radeon_fbdev_robj_is_fb(struct radeon_device *rdev, struct radeon_bo *robj);
++void radeon_fbdev_restore_mode(struct radeon_device *rdev);
+ 
+ void radeon_fb_output_poll_changed(struct radeon_device *rdev);
+ 
++void radeon_crtc_handle_vblank(struct radeon_device *rdev, int crtc_id);
++
++void radeon_fb_add_connector(struct radeon_device *rdev, struct drm_connector *connector);
++void radeon_fb_remove_connector(struct radeon_device *rdev, struct drm_connector *connector);
++
+ void radeon_crtc_handle_flip(struct radeon_device *rdev, int crtc_id);
+ 
+ int radeon_align_pitch(struct radeon_device *rdev, int width, int bpp, bool tiled);
++
++/* mst */
++int radeon_dp_mst_init(struct radeon_connector *radeon_connector);
++int radeon_dp_mst_probe(struct radeon_connector *radeon_connector);
++int radeon_dp_mst_check_status(struct radeon_connector *radeon_connector);
++int radeon_mst_debugfs_init(struct radeon_device *rdev);
++void radeon_dp_mst_prepare_pll(struct drm_crtc *crtc, struct drm_display_mode *mode);
++
++void radeon_setup_mst_connector(struct drm_device *dev);
++
++int radeon_atom_pick_dig_encoder(struct drm_encoder *encoder, int fe_idx);
++void radeon_atom_release_dig_encoder(struct radeon_device *rdev, int enc_idx);
+ #endif

@@ -1,0 +1,187 @@
+--- i915/intel_fbdev.c	2016-07-22 15:48:08.000000000 +0900
++++ i915/intel_fbdev.c	2016-07-12 01:31:24.000000000 +0900
+@@ -45,15 +47,70 @@
+ #include <drm/i915_drm.h>
+ #include "i915_drv.h"
+ 
++static int intel_fbdev_set_par(struct fb_info *info)
++{
++	struct drm_fb_helper *fb_helper = info->par;
++	struct intel_fbdev *ifbdev =
++		container_of(fb_helper, struct intel_fbdev, helper);
++	int ret;
++
++	ret = drm_fb_helper_set_par(info);
++
++	if (ret == 0) {
++		mutex_lock(&fb_helper->dev->struct_mutex);
++		intel_fb_obj_invalidate(ifbdev->fb->obj, ORIGIN_GTT);
++		mutex_unlock(&fb_helper->dev->struct_mutex);
++	}
++
++	return ret;
++}
++
++static int intel_fbdev_blank(int blank, struct fb_info *info)
++{
++	struct drm_fb_helper *fb_helper = info->par;
++	struct intel_fbdev *ifbdev =
++		container_of(fb_helper, struct intel_fbdev, helper);
++	int ret;
++
++	ret = drm_fb_helper_blank(blank, info);
++
++	if (ret == 0) {
++		mutex_lock(&fb_helper->dev->struct_mutex);
++		intel_fb_obj_invalidate(ifbdev->fb->obj, ORIGIN_GTT);
++		mutex_unlock(&fb_helper->dev->struct_mutex);
++	}
++
++	return ret;
++}
++
++static int intel_fbdev_pan_display(struct fb_var_screeninfo *var,
++				   struct fb_info *info)
++{
++	struct drm_fb_helper *fb_helper = info->par;
++	struct intel_fbdev *ifbdev =
++		container_of(fb_helper, struct intel_fbdev, helper);
++
++	int ret;
++	ret = drm_fb_helper_pan_display(var, info);
++
++	if (ret == 0) {
++		mutex_lock(&fb_helper->dev->struct_mutex);
++		intel_fb_obj_invalidate(ifbdev->fb->obj, ORIGIN_GTT);
++		mutex_unlock(&fb_helper->dev->struct_mutex);
++	}
++
++	return ret;
++}
++
+ static struct fb_ops intelfb_ops = {
+ 	.owner = THIS_MODULE,
+ 	.fb_check_var = drm_fb_helper_check_var,
+-	.fb_set_par = drm_fb_helper_set_par,
+-	.fb_fillrect = cfb_fillrect,
+-	.fb_copyarea = cfb_copyarea,
+-	.fb_imageblit = cfb_imageblit,
+-	.fb_pan_display = drm_fb_helper_pan_display,
+-	.fb_blank = drm_fb_helper_blank,
++	.fb_set_par = intel_fbdev_set_par,
++	.fb_fillrect = drm_fb_helper_cfb_fillrect,
++	.fb_copyarea = drm_fb_helper_cfb_copyarea,
++	.fb_imageblit = drm_fb_helper_cfb_imageblit,
++	.fb_pan_display = intel_fbdev_pan_display,
++	.fb_blank = intel_fbdev_blank,
+ 	.fb_setcmap = drm_fb_helper_setcmap,
+ 	.fb_debug_enter = drm_fb_helper_debug_enter,
+ 	.fb_debug_leave = drm_fb_helper_debug_leave,
+@@ -66,8 +123,9 @@ static int intelfb_alloc(struct drm_fb_h
+ 		container_of(helper, struct intel_fbdev, helper);
+ 	struct drm_framebuffer *fb;
+ 	struct drm_device *dev = helper->dev;
++	struct drm_i915_private *dev_priv = to_i915(dev);
+ 	struct drm_mode_fb_cmd2 mode_cmd = {};
+-	struct drm_i915_gem_object *obj;
++	struct drm_i915_gem_object *obj = NULL;
+ 	int size, ret;
+ 
+ 	/* we don't do packed 24bpp */
+@@ -83,8 +141,13 @@ static int intelfb_alloc(struct drm_fb_h
+ 							  sizes->surface_depth);
+ 
+ 	size = mode_cmd.pitches[0] * mode_cmd.height;
+-	size = ALIGN(size, PAGE_SIZE);
+-	obj = i915_gem_object_create_stolen(dev, size);
++	size = PAGE_ALIGN(size);
++
++	/* If the FB is too big, just don't use it since fbdev is not very
++	 * important and we should probably use that space with FBC or other
++	 * features. */
++	if (size * 2 < dev_priv->gtt.stolen_usable_size)
++		obj = i915_gem_object_create_stolen(dev, size);
+ 	if (obj == NULL)
+ 		obj = i915_gem_alloc_object(dev, size);
+ 	if (!obj) {
+@@ -160,9 +223,9 @@ static int intelfb_create(struct drm_fb_
+ 	obj = intel_fb->obj;
+ 	size = obj->base.size;
+ 
+-	info = framebuffer_alloc(0, &dev->pdev->dev);
+-	if (!info) {
+-		ret = -ENOMEM;
++	info = drm_fb_helper_alloc_fbi(helper);
++	if (IS_ERR(info)) {
++		ret = PTR_ERR(info);
+ 		goto out_unpin;
+ 	}
+ 
+@@ -459,16 +521,9 @@ static struct drm_fb_helper_funcs intel_
+ static void intel_fbdev_destroy(struct drm_device *dev,
+ 				struct intel_fbdev *ifbdev)
+ {
+-	if (ifbdev->helper.fbdev) {
+-		struct fb_info *info = ifbdev->helper.fbdev;
+ 
+-		unregister_framebuffer(info);
+-		iounmap(info->screen_base);
+-		if (info->cmap.len)
+-			fb_dealloc_cmap(&info->cmap);
+-
+-		framebuffer_release(info);
+-	}
++	drm_fb_helper_unregister_fbi(&ifbdev->helper);
++	drm_fb_helper_release_fbi(&ifbdev->helper);
+ 
+ 	drm_fb_helper_fini(&ifbdev->helper);
+ 
+@@ -538,24 +590,25 @@ static bool intel_fbdev_init_bios(struct
+ 		 * pipe.  Note we need to use the selected fb's pitch and bpp
+ 		 * rather than the current pipe's, since they differ.
+ 		 */
+-		cur_size = intel_crtc->config.adjusted_mode.crtc_hdisplay;
++		cur_size = intel_crtc->config->base.adjusted_mode.crtc_hdisplay;
+ 		cur_size = cur_size * fb->base.bits_per_pixel / 8;
+ 		if (fb->base.pitches[0] < cur_size) {
+ 			DRM_DEBUG_KMS("fb not wide enough for plane %c (%d vs %d)\n",
+ 				      pipe_name(intel_crtc->pipe),
+ 				      cur_size, fb->base.pitches[0]);
+-			plane_config = NULL;
+ 			fb = NULL;
+ 			break;
+ 		}
+ 
+-		cur_size = intel_crtc->config.adjusted_mode.crtc_vdisplay;
+-		cur_size = ALIGN(cur_size, plane_config->tiled ? (IS_GEN2(dev) ? 16 : 8) : 1);
++		cur_size = intel_crtc->config->base.adjusted_mode.crtc_vdisplay;
++		cur_size = intel_fb_align_height(dev, cur_size,
++						 fb->base.pixel_format,
++						 fb->base.modifier[0]);
+ 		cur_size *= fb->base.pitches[0];
+ 		DRM_DEBUG_KMS("pipe %c area: %dx%d, bpp: %d, size: %d\n",
+ 			      pipe_name(intel_crtc->pipe),
+-			      intel_crtc->config.adjusted_mode.crtc_hdisplay,
+-			      intel_crtc->config.adjusted_mode.crtc_vdisplay,
++			      intel_crtc->config->base.adjusted_mode.crtc_hdisplay,
++			      intel_crtc->config->base.adjusted_mode.crtc_vdisplay,
+ 			      fb->base.bits_per_pixel,
+ 			      cur_size);
+ 
+@@ -662,12 +728,15 @@ void intel_fbdev_fini(struct drm_device 
+ 	if (!dev_priv->fbdev)
+ 		return;
+ 
++	flush_work(&dev_priv->fbdev_suspend_work);
++
++	async_synchronize_full();
+ 	intel_fbdev_destroy(dev, dev_priv->fbdev);
+ 	kfree(dev_priv->fbdev);
+ 	dev_priv->fbdev = NULL;
+ }
+ 
+-void intel_fbdev_set_suspend(struct drm_device *dev, int state)
++void intel_fbdev_set_suspend(struct drm_device *dev, int state, bool synchronous)
+ {
+ 	struct drm_i915_private *dev_priv = dev->dev_private;
+ 	struct intel_fbdev *ifbdev = dev_priv->fbdev;

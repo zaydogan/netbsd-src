@@ -28,14 +28,19 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/async.h>
 #include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_fb_helper.h>
+#include <drm/drm_legacy.h>
 #include "intel_drv.h"
 #include <drm/i915_drm.h>
 #include "i915_drv.h"
+#include "i915_vgpu.h"
 #include "i915_trace.h"
 #include <linux/pci.h>
+#include <linux/console.h>
+#include <linux/vt.h>
 #include <linux/vgaarb.h>
 #include <linux/acpi.h>
 #include <linux/pnp.h>
@@ -1002,6 +1007,9 @@ static int i915_getparam(struct drm_device *dev, void *data,
 	case I915_PARAM_HAS_VEBOX:
 		value = intel_ring_initialized(&dev_priv->ring[VECS]);
 		break;
+	case I915_PARAM_HAS_BSD2:
+		value = intel_ring_initialized(&dev_priv->ring[VCS2]);
+		break;
 	case I915_PARAM_HAS_RELAXED_FENCING:
 		value = 1;
 		break;
@@ -1024,7 +1032,7 @@ static int i915_getparam(struct drm_device *dev, void *data,
 		value = HAS_WT(dev);
 		break;
 	case I915_PARAM_HAS_ALIASING_PPGTT:
-		value = dev_priv->mm.aliasing_ppgtt || USES_FULL_PPGTT(dev);
+		value = USES_PPGTT(dev);
 		break;
 	case I915_PARAM_HAS_WAIT_TIMEOUT:
 		value = 1;
@@ -1319,17 +1327,18 @@ static void i915_switcheroo_set_state(struct pci_dev *pdev, enum vga_switcheroo_
 {
 	struct drm_device *dev = pci_get_drvdata(pdev);
 	pm_message_t pmm = { .event = PM_EVENT_SUSPEND };
+
 	if (state == VGA_SWITCHEROO_ON) {
 		pr_info("switched on\n");
 		dev->switch_power_state = DRM_SWITCH_POWER_CHANGING;
 		/* i915 resume handler doesn't set to D0 */
 		pci_set_power_state(dev->pdev, PCI_D0);
-		i915_resume(dev);
+		i915_resume_switcheroo(dev);
 		dev->switch_power_state = DRM_SWITCH_POWER_ON;
 	} else {
 		pr_err("switched off\n");
 		dev->switch_power_state = DRM_SWITCH_POWER_CHANGING;
-		i915_suspend(dev, pmm);
+		i915_suspend_switcheroo(dev, pmm);
 		dev->switch_power_state = DRM_SWITCH_POWER_OFF;
 	}
 }
@@ -1337,12 +1346,13 @@ static void i915_switcheroo_set_state(struct pci_dev *pdev, enum vga_switcheroo_
 static bool i915_switcheroo_can_switch(struct pci_dev *pdev)
 {
 	struct drm_device *dev = pci_get_drvdata(pdev);
-	bool can_switch;
 
-	spin_lock(&dev->count_lock);
-	can_switch = (dev->open_count == 0);
-	spin_unlock(&dev->count_lock);
-	return can_switch;
+	/*
+	 * FIXME: open_count is protected by drm_global_mutex but that would lead to
+	 * locking inversion with the driver load path. And the access here is
+	 * completely racy anyway. So don't bother with locking for now.
+	 */
+	return dev->open_count == 0;
 }
 
 static const struct vga_switcheroo_client_ops i915_switcheroo_ops = {
@@ -1395,36 +1405,36 @@ static int i915_load_modeset_init(struct drm_device *dev)
 
 	intel_power_domains_init_hw(dev_priv);
 
-	ret = drm_irq_install(dev);
+	ret = intel_irq_install(dev_priv);
 	if (ret)
 		goto cleanup_gem_stolen;
+
+	intel_setup_gmbus(dev);
 
 	/* Important: The output setup functions called by modeset_init need
 	 * working irqs for e.g. gmbus and dp aux transfers. */
 	intel_modeset_init(dev);
 
+	intel_guc_ucode_init(dev);
+
 	ret = i915_gem_init(dev);
 	if (ret)
-		goto cleanup_power;
-
-	INIT_WORK(&dev_priv->console_resume_work, intel_console_resume);
+		goto cleanup_irq;
 
 	intel_modeset_gem_init(dev);
 
 	/* Always safe in the mode setting case. */
 	/* FIXME: do pre/post-mode set stuff in core KMS code */
 	dev->vblank_disable_allowed = true;
-	if (INTEL_INFO(dev)->num_pipes == 0) {
-		intel_display_power_put(dev_priv, POWER_DOMAIN_VGA);
+	if (INTEL_INFO(dev)->num_pipes == 0)
 		return 0;
-	}
 
 	ret = intel_fbdev_init(dev);
 	if (ret)
 		goto cleanup_gem;
 
 	/* Only enable hotplug handling once the fbdev is fully set up. */
-	intel_hpd_init(dev);
+	intel_hpd_init(dev_priv);
 
 	/*
 	 * Some ports require correctly set-up hpd registers for detection to
@@ -1436,10 +1446,7 @@ static int i915_load_modeset_init(struct drm_device *dev)
 	 * scanning against hotplug events. Hence do this first and ignore the
 	 * tiny window where we will loose hotplug notifactions.
 	 */
-	intel_fbdev_initial_config(dev);
-
-	/* Only enable hotplug handling once the fbdev is fully set up. */
-	dev_priv->enable_hotplug_processing = true;
+	async_schedule(intel_fbdev_initial_config, dev_priv);
 
 	drm_kms_helper_poll_init(dev);
 
@@ -1450,11 +1457,10 @@ cleanup_gem:
 	i915_gem_cleanup_ringbuffer(dev);
 	i915_gem_context_fini(dev);
 	mutex_unlock(&dev->struct_mutex);
-	WARN_ON(dev_priv->mm.aliasing_ppgtt);
-	drm_mm_takedown(&dev_priv->gtt.base.mm);
-cleanup_power:
-	intel_display_power_put(dev_priv, POWER_DOMAIN_VGA);
+cleanup_irq:
+	intel_guc_ucode_fini(dev);
 	drm_irq_uninstall(dev);
+	intel_teardown_gmbus(dev);
 cleanup_gem_stolen:
 	intel_modeset_cleanup(dev);
 	i915_gem_cleanup_stolen(dev);
@@ -1468,40 +1474,17 @@ out:
 	return ret;
 }
 
-int i915_master_create(struct drm_device *dev, struct drm_master *master)
-{
-	struct drm_i915_master_private *master_priv;
-
-	master_priv = kzalloc(sizeof(*master_priv), GFP_KERNEL);
-	if (!master_priv)
-		return -ENOMEM;
-
-	master->driver_priv = master_priv;
-	return 0;
-}
-
-void i915_master_destroy(struct drm_device *dev, struct drm_master *master)
-{
-	struct drm_i915_master_private *master_priv = master->driver_priv;
-
-	if (!master_priv)
-		return;
-
-	kfree(master_priv);
-
-	master->driver_priv = NULL;
-}
-
 #if IS_ENABLED(CONFIG_FB)
-static void i915_kick_out_firmware_fb(struct drm_i915_private *dev_priv)
+static int i915_kick_out_firmware_fb(struct drm_i915_private *dev_priv)
 {
 	struct apertures_struct *ap;
 	struct pci_dev *pdev = dev_priv->dev->pdev;
 	bool primary;
+	int ret;
 
 	ap = alloc_apertures(1);
 	if (!ap)
-		return;
+		return -ENOMEM;
 
 	ap->ranges[0].base = dev_priv->gtt.mappable_base;
 	ap->ranges[0].size = dev_priv->gtt.mappable_end;
@@ -1509,13 +1492,49 @@ static void i915_kick_out_firmware_fb(struct drm_i915_private *dev_priv)
 	primary =
 		pdev->resource[PCI_ROM_RESOURCE].flags & IORESOURCE_ROM_SHADOW;
 
-	remove_conflicting_framebuffers(ap, "inteldrmfb", primary);
+	ret = remove_conflicting_framebuffers(ap, "inteldrmfb", primary);
 
 	kfree(ap);
+
+	return ret;
 }
 #else
-static void i915_kick_out_firmware_fb(struct drm_i915_private *dev_priv)
+static int i915_kick_out_firmware_fb(struct drm_i915_private *dev_priv)
 {
+	return 0;
+}
+#endif
+
+#if !defined(CONFIG_VGA_CONSOLE)
+static int i915_kick_out_vgacon(struct drm_i915_private *dev_priv)
+{
+	return 0;
+}
+#elif !defined(CONFIG_DUMMY_CONSOLE)
+static int i915_kick_out_vgacon(struct drm_i915_private *dev_priv)
+{
+	return -ENODEV;
+}
+#else
+static int i915_kick_out_vgacon(struct drm_i915_private *dev_priv)
+{
+	int ret = 0;
+
+	DRM_INFO("Replacing VGA console driver\n");
+
+	console_lock();
+	if (con_is_bound(&vga_con))
+		ret = do_take_over_console(&dummy_con, 0, MAX_NR_CONSOLES - 1, 1);
+	if (ret == 0) {
+		ret = do_unregister_con_driver(&vga_con);
+
+		/* Ignore "already unregistered". */
+		if (ret == -ENODEV)
+			ret = 0;
+	}
+	console_unlock();
+
+	return ret;
 }
 #endif
 
@@ -1527,15 +1546,215 @@ static void i915_dump_device_info(struct drm_i915_private *dev_priv)
 #define SEP_EMPTY
 #define PRINT_FLAG(name) info->name ? #name "," : ""
 #define SEP_COMMA ,
-	DRM_DEBUG_DRIVER("i915 device info: gen=%i, pciid=0x%04x flags="
+	DRM_DEBUG_DRIVER("i915 device info: gen=%i, pciid=0x%04x rev=0x%02x flags="
 			 DEV_INFO_FOR_EACH_FLAG(PRINT_S, SEP_EMPTY),
 			 info->gen,
 			 dev_priv->dev->pdev->device,
+			 dev_priv->dev->pdev->revision,
 			 DEV_INFO_FOR_EACH_FLAG(PRINT_FLAG, SEP_COMMA));
 #undef PRINT_S
 #undef SEP_EMPTY
 #undef PRINT_FLAG
 #undef SEP_COMMA
+}
+
+static void cherryview_sseu_info_init(struct drm_device *dev)
+{
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct intel_device_info *info;
+	u32 fuse, eu_dis;
+
+	info = (struct intel_device_info *)&dev_priv->info;
+	fuse = I915_READ(CHV_FUSE_GT);
+
+	info->slice_total = 1;
+
+	if (!(fuse & CHV_FGT_DISABLE_SS0)) {
+		info->subslice_per_slice++;
+		eu_dis = fuse & (CHV_FGT_EU_DIS_SS0_R0_MASK |
+				 CHV_FGT_EU_DIS_SS0_R1_MASK);
+		info->eu_total += 8 - hweight32(eu_dis);
+	}
+
+	if (!(fuse & CHV_FGT_DISABLE_SS1)) {
+		info->subslice_per_slice++;
+		eu_dis = fuse & (CHV_FGT_EU_DIS_SS1_R0_MASK |
+				 CHV_FGT_EU_DIS_SS1_R1_MASK);
+		info->eu_total += 8 - hweight32(eu_dis);
+	}
+
+	info->subslice_total = info->subslice_per_slice;
+	/*
+	 * CHV expected to always have a uniform distribution of EU
+	 * across subslices.
+	*/
+	info->eu_per_subslice = info->subslice_total ?
+				info->eu_total / info->subslice_total :
+				0;
+	/*
+	 * CHV supports subslice power gating on devices with more than
+	 * one subslice, and supports EU power gating on devices with
+	 * more than one EU pair per subslice.
+	*/
+	info->has_slice_pg = 0;
+	info->has_subslice_pg = (info->subslice_total > 1);
+	info->has_eu_pg = (info->eu_per_subslice > 2);
+}
+
+static void gen9_sseu_info_init(struct drm_device *dev)
+{
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct intel_device_info *info;
+	int s_max = 3, ss_max = 4, eu_max = 8;
+	int s, ss;
+	u32 fuse2, s_enable, ss_disable, eu_disable;
+	u8 eu_mask = 0xff;
+
+	info = (struct intel_device_info *)&dev_priv->info;
+	fuse2 = I915_READ(GEN8_FUSE2);
+	s_enable = (fuse2 & GEN8_F2_S_ENA_MASK) >>
+		   GEN8_F2_S_ENA_SHIFT;
+	ss_disable = (fuse2 & GEN9_F2_SS_DIS_MASK) >>
+		     GEN9_F2_SS_DIS_SHIFT;
+
+	info->slice_total = hweight32(s_enable);
+	/*
+	 * The subslice disable field is global, i.e. it applies
+	 * to each of the enabled slices.
+	*/
+	info->subslice_per_slice = ss_max - hweight32(ss_disable);
+	info->subslice_total = info->slice_total *
+			       info->subslice_per_slice;
+
+	/*
+	 * Iterate through enabled slices and subslices to
+	 * count the total enabled EU.
+	*/
+	for (s = 0; s < s_max; s++) {
+		if (!(s_enable & (0x1 << s)))
+			/* skip disabled slice */
+			continue;
+
+		eu_disable = I915_READ(GEN9_EU_DISABLE(s));
+		for (ss = 0; ss < ss_max; ss++) {
+			int eu_per_ss;
+
+			if (ss_disable & (0x1 << ss))
+				/* skip disabled subslice */
+				continue;
+
+			eu_per_ss = eu_max - hweight8((eu_disable >> (ss*8)) &
+						      eu_mask);
+
+			/*
+			 * Record which subslice(s) has(have) 7 EUs. we
+			 * can tune the hash used to spread work among
+			 * subslices if they are unbalanced.
+			 */
+			if (eu_per_ss == 7)
+				info->subslice_7eu[s] |= 1 << ss;
+
+			info->eu_total += eu_per_ss;
+		}
+	}
+
+	/*
+	 * SKL is expected to always have a uniform distribution
+	 * of EU across subslices with the exception that any one
+	 * EU in any one subslice may be fused off for die
+	 * recovery. BXT is expected to be perfectly uniform in EU
+	 * distribution.
+	*/
+	info->eu_per_subslice = info->subslice_total ?
+				DIV_ROUND_UP(info->eu_total,
+					     info->subslice_total) : 0;
+	/*
+	 * SKL supports slice power gating on devices with more than
+	 * one slice, and supports EU power gating on devices with
+	 * more than one EU pair per subslice. BXT supports subslice
+	 * power gating on devices with more than one subslice, and
+	 * supports EU power gating on devices with more than one EU
+	 * pair per subslice.
+	*/
+	info->has_slice_pg = (IS_SKYLAKE(dev) && (info->slice_total > 1));
+	info->has_subslice_pg = (IS_BROXTON(dev) && (info->subslice_total > 1));
+	info->has_eu_pg = (info->eu_per_subslice > 2);
+}
+
+static void broadwell_sseu_info_init(struct drm_device *dev)
+{
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct intel_device_info *info;
+	const int s_max = 3, ss_max = 3, eu_max = 8;
+	int s, ss;
+	u32 fuse2, eu_disable[s_max], s_enable, ss_disable;
+
+	fuse2 = I915_READ(GEN8_FUSE2);
+	s_enable = (fuse2 & GEN8_F2_S_ENA_MASK) >> GEN8_F2_S_ENA_SHIFT;
+	ss_disable = (fuse2 & GEN8_F2_SS_DIS_MASK) >> GEN8_F2_SS_DIS_SHIFT;
+
+	eu_disable[0] = I915_READ(GEN8_EU_DISABLE0) & GEN8_EU_DIS0_S0_MASK;
+	eu_disable[1] = (I915_READ(GEN8_EU_DISABLE0) >> GEN8_EU_DIS0_S1_SHIFT) |
+			((I915_READ(GEN8_EU_DISABLE1) & GEN8_EU_DIS1_S1_MASK) <<
+			 (32 - GEN8_EU_DIS0_S1_SHIFT));
+	eu_disable[2] = (I915_READ(GEN8_EU_DISABLE1) >> GEN8_EU_DIS1_S2_SHIFT) |
+			((I915_READ(GEN8_EU_DISABLE2) & GEN8_EU_DIS2_S2_MASK) <<
+			 (32 - GEN8_EU_DIS1_S2_SHIFT));
+
+
+	info = (struct intel_device_info *)&dev_priv->info;
+	info->slice_total = hweight32(s_enable);
+
+	/*
+	 * The subslice disable field is global, i.e. it applies
+	 * to each of the enabled slices.
+	 */
+	info->subslice_per_slice = ss_max - hweight32(ss_disable);
+	info->subslice_total = info->slice_total * info->subslice_per_slice;
+
+	/*
+	 * Iterate through enabled slices and subslices to
+	 * count the total enabled EU.
+	 */
+	for (s = 0; s < s_max; s++) {
+		if (!(s_enable & (0x1 << s)))
+			/* skip disabled slice */
+			continue;
+
+		for (ss = 0; ss < ss_max; ss++) {
+			u32 n_disabled;
+
+			if (ss_disable & (0x1 << ss))
+				/* skip disabled subslice */
+				continue;
+
+			n_disabled = hweight8(eu_disable[s] >> (ss * eu_max));
+
+			/*
+			 * Record which subslices have 7 EUs.
+			 */
+			if (eu_max - n_disabled == 7)
+				info->subslice_7eu[s] |= 1 << ss;
+
+			info->eu_total += eu_max - n_disabled;
+		}
+	}
+
+	/*
+	 * BDW is expected to always have a uniform distribution of EU across
+	 * subslices with the exception that any one EU in any one subslice may
+	 * be fused off for die recovery.
+	 */
+	info->eu_per_subslice = info->subslice_total ?
+		DIV_ROUND_UP(info->eu_total, info->subslice_total) : 0;
+
+	/*
+	 * BDW supports slice power gating on devices with more than
+	 * one slice.
+	 */
+	info->has_slice_pg = (info->slice_total > 1);
+	info->has_subslice_pg = 0;
+	info->has_eu_pg = 0;
 }
 
 /*
@@ -1559,11 +1778,23 @@ static void intel_device_info_runtime_init(struct drm_device *dev)
 
 	info = (struct intel_device_info *)&dev_priv->info;
 
-	if (IS_VALLEYVIEW(dev))
-		for_each_pipe(pipe)
+	/*
+	 * Skylake and Broxton currently don't expose the topmost plane as its
+	 * use is exclusive with the legacy cursor and we only want to expose
+	 * one of those, not both. Until we can safely expose the topmost plane
+	 * as a DRM_PLANE_TYPE_CURSOR with all the features exposed/supported,
+	 * we don't expose the topmost plane at all to prevent ABI breakage
+	 * down the line.
+	 */
+	if (IS_BROXTON(dev)) {
+		info->num_sprites[PIPE_A] = 2;
+		info->num_sprites[PIPE_B] = 2;
+		info->num_sprites[PIPE_C] = 1;
+	} else if (IS_VALLEYVIEW(dev))
+		for_each_pipe(dev_priv, pipe)
 			info->num_sprites[pipe] = 2;
 	else
-		for_each_pipe(pipe)
+		for_each_pipe(dev_priv, pipe)
 			info->num_sprites[pipe] = 1;
 
 	if (i915.disable_display) {
@@ -1591,6 +1822,44 @@ static void intel_device_info_runtime_init(struct drm_device *dev)
 			DRM_INFO("Display fused off, disabling\n");
 			info->num_pipes = 0;
 		}
+	}
+
+	/* Initialize slice/subslice/EU info */
+	if (IS_CHERRYVIEW(dev))
+		cherryview_sseu_info_init(dev);
+	else if (IS_BROADWELL(dev))
+		broadwell_sseu_info_init(dev);
+	else if (INTEL_INFO(dev)->gen >= 9)
+		gen9_sseu_info_init(dev);
+
+	DRM_DEBUG_DRIVER("slice total: %u\n", info->slice_total);
+	DRM_DEBUG_DRIVER("subslice total: %u\n", info->subslice_total);
+	DRM_DEBUG_DRIVER("subslice per slice: %u\n", info->subslice_per_slice);
+	DRM_DEBUG_DRIVER("EU total: %u\n", info->eu_total);
+	DRM_DEBUG_DRIVER("EU per subslice: %u\n", info->eu_per_subslice);
+	DRM_DEBUG_DRIVER("has slice power gating: %s\n",
+			 info->has_slice_pg ? "y" : "n");
+	DRM_DEBUG_DRIVER("has subslice power gating: %s\n",
+			 info->has_subslice_pg ? "y" : "n");
+	DRM_DEBUG_DRIVER("has EU power gating: %s\n",
+			 info->has_eu_pg ? "y" : "n");
+}
+
+static void intel_init_dpio(struct drm_i915_private *dev_priv)
+{
+	if (!IS_VALLEYVIEW(dev_priv))
+		return;
+
+	/*
+	 * IOSF_PORT_DPIO is used for VLV x2 PHY (DP/HDMI B and C),
+	 * CHV x1 PHY (DP/HDMI D)
+	 * IOSF_PORT_DPIO_2 is used for CHV x2 PHY (DP/HDMI B and C)
+	 */
+	if (IS_CHERRYVIEW(dev_priv)) {
+		DPIO_PHY_IOSF_PORT(DPIO_PHY0) = IOSF_PORT_DPIO_2;
+		DPIO_PHY_IOSF_PORT(DPIO_PHY1) = IOSF_PORT_DPIO;
+	} else {
+		DPIO_PHY_IOSF_PORT(DPIO_PHY0) = IOSF_PORT_DPIO;
 	}
 }
 
@@ -1702,12 +1971,26 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	intel_uncore_init(dev);
 
+	/* Load CSR Firmware for SKL */
+	intel_csr_ucode_init(dev);
+
 	ret = i915_gem_gtt_init(dev);
 	if (ret)
-		goto out_regs;
+		goto out_freecsr;
 
-	if (drm_core_check_feature(dev, DRIVER_MODESET))
-		i915_kick_out_firmware_fb(dev_priv);
+	/* WARNING: Apparently we must kick fbdev drivers before vgacon,
+	 * otherwise the vga fbdev driver falls over. */
+	ret = i915_kick_out_firmware_fb(dev_priv);
+	if (ret) {
+		DRM_ERROR("failed to remove conflicting framebuffer drivers\n");
+		goto out_gtt;
+	}
+
+	ret = i915_kick_out_vgacon(dev_priv);
+	if (ret) {
+		DRM_ERROR("failed to remove conflicting VGA console\n");
+		goto out_gtt;
+	}
 
 	pci_set_master(dev->pdev);
 
@@ -1769,15 +2052,27 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		goto out_mtrrfree;
 	}
 
-	intel_irq_init(dev);
+	dev_priv->hotplug.dp_wq = alloc_ordered_workqueue("i915-dp", 0);
+	if (dev_priv->hotplug.dp_wq == NULL) {
+		DRM_ERROR("Failed to create our dp workqueue.\n");
+		ret = -ENOMEM;
+		goto out_freewq;
+	}
+
+	dev_priv->gpu_error.hangcheck_wq =
+		alloc_ordered_workqueue("i915-hangcheck", 0);
+	if (dev_priv->gpu_error.hangcheck_wq == NULL) {
+		DRM_ERROR("Failed to create our hangcheck workqueue.\n");
+		ret = -ENOMEM;
+		goto out_freedpwq;
+	}
+
+	intel_irq_init(dev_priv);
 	intel_uncore_sanitize(dev);
 
 	/* Try to make sure MCHBAR is enabled before poking at it */
 	intel_setup_mchbar(dev);
-	intel_setup_gmbus(dev);
 	intel_opregion_setup(dev);
-
-	intel_setup_bios(dev);
 
 	i915_gem_load(dev);
 
@@ -1797,6 +2092,8 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	intel_device_info_runtime_init(dev);
 
+	intel_init_dpio(dev_priv);
+
 	if (INTEL_INFO(dev)->num_pipes) {
 		ret = drm_vblank_init(dev, INTEL_INFO(dev)->num_pipes);
 		if (ret)
@@ -1805,16 +2102,18 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	intel_power_domains_init(dev_priv);
 
-	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
-		ret = i915_load_modeset_init(dev);
-		if (ret < 0) {
-			DRM_ERROR("failed to init modeset\n");
-			goto out_power_well;
-		}
-	} else {
-		/* Start out suspended in ums mode. */
-		dev_priv->ums.mm_suspended = 1;
+	ret = i915_load_modeset_init(dev);
+	if (ret < 0) {
+		DRM_ERROR("failed to init modeset\n");
+		goto out_power_well;
 	}
+
+	/*
+	 * Notify a valid surface after modesetting,
+	 * when running inside a VM.
+	 */
+	if (intel_vgpu_active(dev))
+		I915_WRITE(vgtif_reg(display_ready), VGT_DRV_DISPLAY_READY);
 
 	i915_setup_sysfs(dev);
 

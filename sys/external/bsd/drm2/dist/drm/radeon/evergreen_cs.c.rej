@@ -1,0 +1,11 @@
+--- radeon/evergreen_cs.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/evergreen_cs.c	2016-07-12 01:31:24.000000000 +0900
+@@ -447,7 +451,7 @@ static int evergreen_cs_track_validate_c
+ 		 * command stream.
+ 		 */
+ 		if (!surf.mode) {
+-			volatile u32 *ib = p->ib.ptr;
++			uint32_t *ib = p->ib.ptr;
+ 			unsigned long tmp, nby, bsize, size, min = 0;
+ 
+ 			/* find the height the ddx wants */

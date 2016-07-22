@@ -1,0 +1,86 @@
+--- radeon/radeon.h	2016-07-22 15:48:08.000000000 +0900
++++ radeon/radeon.h	2016-07-12 01:31:24.000000000 +0900
+@@ -64,6 +64,9 @@
+ #include <linux/wait.h>
+ #include <linux/list.h>
+ #include <linux/kref.h>
++#include <linux/interval_tree.h>
++#include <linux/hashtable.h>
++#include <linux/fence.h>
+ 
+ #include <ttm/ttm_bo_api.h>
+ #include <ttm/ttm_bo_driver.h>
+@@ -241,6 +248,7 @@ bool radeon_get_bios(struct radeon_devic
+  * Dummy page
+  */
+ struct radeon_dummy_page {
++	uint64_t	entry;
+ 	struct page	*page;
+ 	dma_addr_t	addr;
+ };
+@@ -501,6 +530,9 @@ struct radeon_bo {
+ 
+ 	struct ttm_bo_kmap_obj		dma_buf_vmap;
+ 	pid_t				pid;
++
++	struct radeon_mn		*mn;
++	struct list_head		mn_list;
+ };
+ #define gem_to_radeon_bo(gobj) container_of((gobj), struct radeon_bo, gem_base)
+ 
+@@ -657,8 +711,7 @@ void radeon_gart_unbind(struct radeon_de
+ 			int pages);
+ int radeon_gart_bind(struct radeon_device *rdev, unsigned offset,
+ 		     int pages, struct page **pagelist,
+-		     dma_addr_t *dma_addr);
+-void radeon_gart_restore(struct radeon_device *rdev);
++		     dma_addr_t *dma_addr, uint32_t flags);
+ 
+ 
+ /*
+@@ -713,24 +766,29 @@ struct radeon_doorbell {
+ 	resource_size_t		size;
+ 	u32 __iomem		*ptr;
+ 	u32			num_doorbells;	/* Number of doorbells actually reserved for radeon. */
+-	unsigned long		used[DIV_ROUND_UP(RADEON_MAX_DOORBELLS, BITS_PER_LONG)];
++	DECLARE_BITMAP(used, RADEON_MAX_DOORBELLS);
+ };
+ 
+ int radeon_doorbell_get(struct radeon_device *rdev, u32 *page);
+ void radeon_doorbell_free(struct radeon_device *rdev, u32 doorbell);
++void radeon_doorbell_get_kfd_info(struct radeon_device *rdev,
++				  phys_addr_t *aperture_base,
++				  size_t *aperture_size,
++				  size_t *start_offset);
+ 
+ /*
+  * IRQS.
+  */
+ 
+-struct radeon_unpin_work {
+-	struct work_struct work;
+-	struct radeon_device *rdev;
+-	int crtc_id;
+-	struct radeon_fence *fence;
++struct radeon_flip_work {
++	struct work_struct		flip_work;
++	struct work_struct		unpin_work;
++	struct radeon_device		*rdev;
++	int				crtc_id;
++	uint64_t			base;
+ 	struct drm_pending_vblank_event *event;
+-	struct radeon_bo *old_rbo;
+-	u64 new_crtc_base;
++	struct radeon_bo		*old_rbo;
++	struct fence			*fence;
+ };
+ 
+ struct r500_irq_stat_regs {
+@@ -2366,6 +2486,7 @@ struct radeon_device {
+ 	struct radeon_mman		mman;
+ 	struct radeon_fence_driver	fence_drv[RADEON_NUM_RINGS];
+ 	wait_queue_head_t		fence_queue;
++	unsigned			fence_context;
+ 	struct mutex			ring_lock;
+ 	struct radeon_ring		ring[RADEON_NUM_RINGS];
+ 	bool				ib_pool_ready;

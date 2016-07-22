@@ -1,0 +1,28 @@
+--- nouveau/nouveau_nv84_fence.c	2016-07-22 15:48:08.000000000 +0900
++++ nouveau/nouveau_nv84_fence.c	2016-07-12 01:31:24.000000000 +0900
+@@ -228,13 +217,21 @@ nv84_fence_create(struct nouveau_drm *dr
+ 	priv->base.context_new = nv84_fence_context_new;
+ 	priv->base.context_del = nv84_fence_context_del;
+ 
+-	init_waitqueue_head(&priv->base.waiting);
++	priv->base.contexts = fifo->nr;
++	priv->base.context_base = fence_context_alloc(priv->base.contexts);
+ 	priv->base.uevent = true;
+ 
+-	ret = nouveau_bo_new(drm->dev, 16 * (pfifo->max + 1), 0,
+-			     TTM_PL_FLAG_VRAM, 0, 0, NULL, &priv->bo);
++	/* Use VRAM if there is any ; otherwise fallback to system memory */
++	domain = drm->device.info.ram_size != 0 ? TTM_PL_FLAG_VRAM :
++			 /*
++			  * fences created in sysmem must be non-cached or we
++			  * will lose CPU/GPU coherency!
++			  */
++			 TTM_PL_FLAG_TT | TTM_PL_FLAG_UNCACHED;
++	ret = nouveau_bo_new(drm->dev, 16 * priv->base.contexts, 0, domain, 0,
++			     0, NULL, NULL, &priv->bo);
+ 	if (ret == 0) {
+-		ret = nouveau_bo_pin(priv->bo, TTM_PL_FLAG_VRAM);
++		ret = nouveau_bo_pin(priv->bo, domain, false);
+ 		if (ret == 0) {
+ 			ret = nouveau_bo_map(priv->bo);
+ 			if (ret)

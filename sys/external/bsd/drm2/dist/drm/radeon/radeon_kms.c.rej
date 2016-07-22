@@ -1,0 +1,31 @@
+--- radeon/radeon_kms.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/radeon_kms.c	2016-07-12 01:31:24.000000000 +0900
+@@ -600,14 +671,17 @@ static int radeon_info_ioctl(struct drm_
+  * Outdated mess for old drm with Xorg being in charge (void function now).
+  */
+ /**
+- * radeon_driver_firstopen_kms - drm callback for last close
++ * radeon_driver_lastclose_kms - drm callback for last close
+  *
+  * @dev: drm dev pointer
+  *
+- * Switch vga switcheroo state after last close (all asics).
++ * Switch vga_switcheroo state after last close (all asics).
+  */
+ void radeon_driver_lastclose_kms(struct drm_device *dev)
+ {
++	struct radeon_device *rdev = dev->dev_private;
++
++	radeon_fbdev_restore_mode(rdev);
+ 	vga_switcheroo_process_delayed_switch();
+ }
+ 
+@@ -634,7 +708,7 @@ int radeon_driver_open_kms(struct drm_de
+ 	/* new gpu have virtual address space support */
+ 	if (rdev->family >= CHIP_CAYMAN) {
+ 		struct radeon_fpriv *fpriv;
+-		struct radeon_bo_va *bo_va;
++		struct radeon_vm *vm;
+ 		int r;
+ 
+ 		fpriv = kzalloc(sizeof(*fpriv), GFP_KERNEL);

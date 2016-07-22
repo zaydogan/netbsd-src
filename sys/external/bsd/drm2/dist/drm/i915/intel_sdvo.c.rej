@@ -1,0 +1,11 @@
+--- i915/intel_sdvo.c	2016-07-22 15:48:08.000000000 +0900
++++ i915/intel_sdvo.c	2016-07-12 01:31:24.000000000 +0900
+@@ -2390,7 +2347,7 @@ intel_sdvo_connector_init(struct intel_s
+ 	return 0;
+ 
+ err2:
+-	drm_sysfs_connector_remove(drm_connector);
++	drm_connector_unregister(drm_connector);
+ err1:
+ 	drm_connector_cleanup(drm_connector);
+ 

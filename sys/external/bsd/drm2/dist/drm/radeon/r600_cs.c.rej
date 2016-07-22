@@ -1,0 +1,31 @@
+--- radeon/r600_cs.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/r600_cs.c	2016-07-12 01:31:24.000000000 +0900
+@@ -2435,24 +2433,24 @@ void r600_cs_legacy_init(void)
+  * GPU offset using the provided start.
+  **/
+ int r600_dma_cs_next_reloc(struct radeon_cs_parser *p,
+-			   struct radeon_cs_reloc **cs_reloc)
++			   struct radeon_bo_list **cs_reloc)
+ {
+ 	struct radeon_cs_chunk *relocs_chunk;
+ 	unsigned idx;
+ 
+ 	*cs_reloc = NULL;
+-	if (p->chunk_relocs_idx == -1) {
++	if (p->chunk_relocs == NULL) {
+ 		DRM_ERROR("No relocation chunk !\n");
+ 		return -EINVAL;
+ 	}
+-	relocs_chunk = &p->chunks[p->chunk_relocs_idx];
++	relocs_chunk = p->chunk_relocs;
+ 	idx = p->dma_reloc_idx;
+ 	if (idx >= p->nrelocs) {
+ 		DRM_ERROR("Relocs at %d after relocations chunk end %d !\n",
+ 			  idx, p->nrelocs);
+ 		return -EINVAL;
+ 	}
+-	*cs_reloc = p->relocs_ptr[idx];
++	*cs_reloc = &p->relocs[idx];
+ 	p->dma_reloc_idx++;
+ 	return 0;
+ }

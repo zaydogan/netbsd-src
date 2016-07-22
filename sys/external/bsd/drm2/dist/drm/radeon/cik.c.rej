@@ -1,0 +1,695 @@
+--- radeon/cik.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/cik.c	2016-07-12 01:31:24.000000000 +0900
+@@ -1867,27 +1975,44 @@ static void cik_srbm_select(struct radeo
+  */
+ int ci_mc_load_microcode(struct radeon_device *rdev)
+ {
+-	const __be32 *fw_data;
+-	u32 running, blackout = 0;
+-	u32 *io_mc_regs;
++	const __be32 *fw_data = NULL;
++	const __le32 *new_fw_data = NULL;
++	u32 running, blackout = 0, tmp;
++	u32 *io_mc_regs = NULL;
++	const __le32 *new_io_mc_regs = NULL;
+ 	int i, regs_size, ucode_size;
+ 
+ 	if (!rdev->mc_fw)
+ 		return -EINVAL;
+ 
+-	ucode_size = rdev->mc_fw->size / 4;
++	if (rdev->new_fw) {
++		const struct mc_firmware_header_v1_0 *hdr =
++			(const struct mc_firmware_header_v1_0 *)rdev->mc_fw->data;
++
++		radeon_ucode_print_mc_hdr(&hdr->header);
++
++		regs_size = le32_to_cpu(hdr->io_debug_size_bytes) / (4 * 2);
++		new_io_mc_regs = (const __le32 *)
++			(rdev->mc_fw->data + le32_to_cpu(hdr->io_debug_array_offset_bytes));
++		ucode_size = le32_to_cpu(hdr->header.ucode_size_bytes) / 4;
++		new_fw_data = (const __le32 *)
++			(rdev->mc_fw->data + le32_to_cpu(hdr->header.ucode_array_offset_bytes));
++	} else {
++		ucode_size = rdev->mc_fw->size / 4;
+ 
+-	switch (rdev->family) {
+-	case CHIP_BONAIRE:
+-		io_mc_regs = (u32 *)&bonaire_io_mc_regs;
+-		regs_size = BONAIRE_IO_MC_REGS_SIZE;
+-		break;
+-	case CHIP_HAWAII:
+-		io_mc_regs = (u32 *)&hawaii_io_mc_regs;
+-		regs_size = HAWAII_IO_MC_REGS_SIZE;
+-		break;
+-	default:
+-		return -EINVAL;
++		switch (rdev->family) {
++		case CHIP_BONAIRE:
++			io_mc_regs = (u32 *)&bonaire_io_mc_regs;
++			regs_size = BONAIRE_IO_MC_REGS_SIZE;
++			break;
++		case CHIP_HAWAII:
++			io_mc_regs = (u32 *)&hawaii_io_mc_regs;
++			regs_size = HAWAII_IO_MC_REGS_SIZE;
++			break;
++		default:
++			return -EINVAL;
++		}
++		fw_data = (const __be32 *)rdev->mc_fw->data;
+ 	}
+ 
+ 	running = RREG32(MC_SEQ_SUP_CNTL) & RUN_MASK;
+@@ -1989,9 +2135,11 @@ static int cik_init_microcode(struct rad
+ 		mc2_req_size = BONAIRE_MC2_UCODE_SIZE * 4;
+ 		sdma_req_size = CIK_SDMA_UCODE_SIZE * 4;
+ 		smc_req_size = ALIGN(BONAIRE_SMC_UCODE_SIZE, 4);
++		num_fw = 8;
+ 		break;
+ 	case CHIP_HAWAII:
+ 		chip_name = "HAWAII";
++		new_chip_name = "hawaii";
+ 		pfp_req_size = CIK_PFP_UCODE_SIZE * 4;
+ 		me_req_size = CIK_ME_UCODE_SIZE * 4;
+ 		ce_req_size = CIK_CE_UCODE_SIZE * 4;
+@@ -2001,142 +2149,285 @@ static int cik_init_microcode(struct rad
+ 		mc2_req_size = HAWAII_MC2_UCODE_SIZE * 4;
+ 		sdma_req_size = CIK_SDMA_UCODE_SIZE * 4;
+ 		smc_req_size = ALIGN(HAWAII_SMC_UCODE_SIZE, 4);
++		num_fw = 8;
+ 		break;
+ 	case CHIP_KAVERI:
+ 		chip_name = "KAVERI";
++		new_chip_name = "kaveri";
+ 		pfp_req_size = CIK_PFP_UCODE_SIZE * 4;
+ 		me_req_size = CIK_ME_UCODE_SIZE * 4;
+ 		ce_req_size = CIK_CE_UCODE_SIZE * 4;
+ 		mec_req_size = CIK_MEC_UCODE_SIZE * 4;
+ 		rlc_req_size = KV_RLC_UCODE_SIZE * 4;
+ 		sdma_req_size = CIK_SDMA_UCODE_SIZE * 4;
++		num_fw = 7;
+ 		break;
+ 	case CHIP_KABINI:
+ 		chip_name = "KABINI";
++		new_chip_name = "kabini";
+ 		pfp_req_size = CIK_PFP_UCODE_SIZE * 4;
+ 		me_req_size = CIK_ME_UCODE_SIZE * 4;
+ 		ce_req_size = CIK_CE_UCODE_SIZE * 4;
+ 		mec_req_size = CIK_MEC_UCODE_SIZE * 4;
+ 		rlc_req_size = KB_RLC_UCODE_SIZE * 4;
+ 		sdma_req_size = CIK_SDMA_UCODE_SIZE * 4;
++		num_fw = 6;
+ 		break;
+ 	case CHIP_MULLINS:
+ 		chip_name = "MULLINS";
++		new_chip_name = "mullins";
+ 		pfp_req_size = CIK_PFP_UCODE_SIZE * 4;
+ 		me_req_size = CIK_ME_UCODE_SIZE * 4;
+ 		ce_req_size = CIK_CE_UCODE_SIZE * 4;
+ 		mec_req_size = CIK_MEC_UCODE_SIZE * 4;
+ 		rlc_req_size = ML_RLC_UCODE_SIZE * 4;
+ 		sdma_req_size = CIK_SDMA_UCODE_SIZE * 4;
++		num_fw = 6;
+ 		break;
+ 	default: BUG();
+ 	}
+ 
+-	DRM_INFO("Loading %s Microcode\n", chip_name);
++	DRM_INFO("Loading %s Microcode\n", new_chip_name);
+ 
+-	snprintf(fw_name, sizeof(fw_name), "radeon/%s_pfp.bin", chip_name);
++	snprintf(fw_name, sizeof(fw_name), "radeon/%s_pfp.bin", new_chip_name);
+ 	err = request_firmware(&rdev->pfp_fw, fw_name, rdev->dev);
+-	if (err)
+-		goto out;
+-	if (rdev->pfp_fw->size != pfp_req_size) {
+-		printk(KERN_ERR
+-		       "cik_cp: Bogus length %zu in firmware \"%s\"\n",
+-		       rdev->pfp_fw->size, fw_name);
+-		err = -EINVAL;
+-		goto out;
++	if (err) {
++		snprintf(fw_name, sizeof(fw_name), "radeon/%s_pfp.bin", chip_name);
++		err = request_firmware(&rdev->pfp_fw, fw_name, rdev->dev);
++		if (err)
++			goto out;
++		if (rdev->pfp_fw->size != pfp_req_size) {
++			printk(KERN_ERR
++			       "cik_cp: Bogus length %zu in firmware \"%s\"\n",
++			       rdev->pfp_fw->size, fw_name);
++			err = -EINVAL;
++			goto out;
++		}
++	} else {
++		err = radeon_ucode_validate(rdev->pfp_fw);
++		if (err) {
++			printk(KERN_ERR
++			       "cik_fw: validation failed for firmware \"%s\"\n",
++			       fw_name);
++			goto out;
++		} else {
++			new_fw++;
++		}
+ 	}
+ 
+-	snprintf(fw_name, sizeof(fw_name), "radeon/%s_me.bin", chip_name);
++	snprintf(fw_name, sizeof(fw_name), "radeon/%s_me.bin", new_chip_name);
+ 	err = request_firmware(&rdev->me_fw, fw_name, rdev->dev);
+-	if (err)
+-		goto out;
+-	if (rdev->me_fw->size != me_req_size) {
+-		printk(KERN_ERR
+-		       "cik_cp: Bogus length %zu in firmware \"%s\"\n",
+-		       rdev->me_fw->size, fw_name);
+-		err = -EINVAL;
++	if (err) {
++		snprintf(fw_name, sizeof(fw_name), "radeon/%s_me.bin", chip_name);
++		err = request_firmware(&rdev->me_fw, fw_name, rdev->dev);
++		if (err)
++			goto out;
++		if (rdev->me_fw->size != me_req_size) {
++			printk(KERN_ERR
++			       "cik_cp: Bogus length %zu in firmware \"%s\"\n",
++			       rdev->me_fw->size, fw_name);
++			err = -EINVAL;
++		}
++	} else {
++		err = radeon_ucode_validate(rdev->me_fw);
++		if (err) {
++			printk(KERN_ERR
++			       "cik_fw: validation failed for firmware \"%s\"\n",
++			       fw_name);
++			goto out;
++		} else {
++			new_fw++;
++		}
+ 	}
+ 
+-	snprintf(fw_name, sizeof(fw_name), "radeon/%s_ce.bin", chip_name);
++	snprintf(fw_name, sizeof(fw_name), "radeon/%s_ce.bin", new_chip_name);
+ 	err = request_firmware(&rdev->ce_fw, fw_name, rdev->dev);
+-	if (err)
+-		goto out;
+-	if (rdev->ce_fw->size != ce_req_size) {
+-		printk(KERN_ERR
+-		       "cik_cp: Bogus length %zu in firmware \"%s\"\n",
+-		       rdev->ce_fw->size, fw_name);
+-		err = -EINVAL;
++	if (err) {
++		snprintf(fw_name, sizeof(fw_name), "radeon/%s_ce.bin", chip_name);
++		err = request_firmware(&rdev->ce_fw, fw_name, rdev->dev);
++		if (err)
++			goto out;
++		if (rdev->ce_fw->size != ce_req_size) {
++			printk(KERN_ERR
++			       "cik_cp: Bogus length %zu in firmware \"%s\"\n",
++			       rdev->ce_fw->size, fw_name);
++			err = -EINVAL;
++		}
++	} else {
++		err = radeon_ucode_validate(rdev->ce_fw);
++		if (err) {
++			printk(KERN_ERR
++			       "cik_fw: validation failed for firmware \"%s\"\n",
++			       fw_name);
++			goto out;
++		} else {
++			new_fw++;
++		}
+ 	}
+ 
+-	snprintf(fw_name, sizeof(fw_name), "radeon/%s_mec.bin", chip_name);
++	snprintf(fw_name, sizeof(fw_name), "radeon/%s_mec.bin", new_chip_name);
+ 	err = request_firmware(&rdev->mec_fw, fw_name, rdev->dev);
+-	if (err)
+-		goto out;
+-	if (rdev->mec_fw->size != mec_req_size) {
+-		printk(KERN_ERR
+-		       "cik_cp: Bogus length %zu in firmware \"%s\"\n",
+-		       rdev->mec_fw->size, fw_name);
+-		err = -EINVAL;
++	if (err) {
++		snprintf(fw_name, sizeof(fw_name), "radeon/%s_mec.bin", chip_name);
++		err = request_firmware(&rdev->mec_fw, fw_name, rdev->dev);
++		if (err)
++			goto out;
++		if (rdev->mec_fw->size != mec_req_size) {
++			printk(KERN_ERR
++			       "cik_cp: Bogus length %zu in firmware \"%s\"\n",
++			       rdev->mec_fw->size, fw_name);
++			err = -EINVAL;
++		}
++	} else {
++		err = radeon_ucode_validate(rdev->mec_fw);
++		if (err) {
++			printk(KERN_ERR
++			       "cik_fw: validation failed for firmware \"%s\"\n",
++			       fw_name);
++			goto out;
++		} else {
++			new_fw++;
++		}
++	}
++
++	if (rdev->family == CHIP_KAVERI) {
++		snprintf(fw_name, sizeof(fw_name), "radeon/%s_mec2.bin", new_chip_name);
++		err = request_firmware(&rdev->mec2_fw, fw_name, rdev->dev);
++		if (err) {
++			goto out;
++		} else {
++			err = radeon_ucode_validate(rdev->mec2_fw);
++			if (err) {
++				goto out;
++			} else {
++				new_fw++;
++			}
++		}
+ 	}
+ 
+-	snprintf(fw_name, sizeof(fw_name), "radeon/%s_rlc.bin", chip_name);
++	snprintf(fw_name, sizeof(fw_name), "radeon/%s_rlc.bin", new_chip_name);
+ 	err = request_firmware(&rdev->rlc_fw, fw_name, rdev->dev);
+-	if (err)
+-		goto out;
+-	if (rdev->rlc_fw->size != rlc_req_size) {
+-		printk(KERN_ERR
+-		       "cik_rlc: Bogus length %zu in firmware \"%s\"\n",
+-		       rdev->rlc_fw->size, fw_name);
+-		err = -EINVAL;
++	if (err) {
++		snprintf(fw_name, sizeof(fw_name), "radeon/%s_rlc.bin", chip_name);
++		err = request_firmware(&rdev->rlc_fw, fw_name, rdev->dev);
++		if (err)
++			goto out;
++		if (rdev->rlc_fw->size != rlc_req_size) {
++			printk(KERN_ERR
++			       "cik_rlc: Bogus length %zu in firmware \"%s\"\n",
++			       rdev->rlc_fw->size, fw_name);
++			err = -EINVAL;
++		}
++	} else {
++		err = radeon_ucode_validate(rdev->rlc_fw);
++		if (err) {
++			printk(KERN_ERR
++			       "cik_fw: validation failed for firmware \"%s\"\n",
++			       fw_name);
++			goto out;
++		} else {
++			new_fw++;
++		}
+ 	}
+ 
+-	snprintf(fw_name, sizeof(fw_name), "radeon/%s_sdma.bin", chip_name);
++	snprintf(fw_name, sizeof(fw_name), "radeon/%s_sdma.bin", new_chip_name);
+ 	err = request_firmware(&rdev->sdma_fw, fw_name, rdev->dev);
+-	if (err)
+-		goto out;
+-	if (rdev->sdma_fw->size != sdma_req_size) {
+-		printk(KERN_ERR
+-		       "cik_sdma: Bogus length %zu in firmware \"%s\"\n",
+-		       rdev->sdma_fw->size, fw_name);
+-		err = -EINVAL;
++	if (err) {
++		snprintf(fw_name, sizeof(fw_name), "radeon/%s_sdma.bin", chip_name);
++		err = request_firmware(&rdev->sdma_fw, fw_name, rdev->dev);
++		if (err)
++			goto out;
++		if (rdev->sdma_fw->size != sdma_req_size) {
++			printk(KERN_ERR
++			       "cik_sdma: Bogus length %zu in firmware \"%s\"\n",
++			       rdev->sdma_fw->size, fw_name);
++			err = -EINVAL;
++		}
++	} else {
++		err = radeon_ucode_validate(rdev->sdma_fw);
++		if (err) {
++			printk(KERN_ERR
++			       "cik_fw: validation failed for firmware \"%s\"\n",
++			       fw_name);
++			goto out;
++		} else {
++			new_fw++;
++		}
+ 	}
+ 
+ 	/* No SMC, MC ucode on APUs */
+ 	if (!(rdev->flags & RADEON_IS_IGP)) {
+-		snprintf(fw_name, sizeof(fw_name), "radeon/%s_mc2.bin", chip_name);
++		snprintf(fw_name, sizeof(fw_name), "radeon/%s_mc.bin", new_chip_name);
+ 		err = request_firmware(&rdev->mc_fw, fw_name, rdev->dev);
+ 		if (err) {
+-			snprintf(fw_name, sizeof(fw_name), "radeon/%s_mc.bin", chip_name);
++			snprintf(fw_name, sizeof(fw_name), "radeon/%s_mc2.bin", chip_name);
+ 			err = request_firmware(&rdev->mc_fw, fw_name, rdev->dev);
+-			if (err)
++			if (err) {
++				snprintf(fw_name, sizeof(fw_name), "radeon/%s_mc.bin", chip_name);
++				err = request_firmware(&rdev->mc_fw, fw_name, rdev->dev);
++				if (err)
++					goto out;
++			}
++			if ((rdev->mc_fw->size != mc_req_size) &&
++			    (rdev->mc_fw->size != mc2_req_size)){
++				printk(KERN_ERR
++				       "cik_mc: Bogus length %zu in firmware \"%s\"\n",
++				       rdev->mc_fw->size, fw_name);
++				err = -EINVAL;
++			}
++			DRM_INFO("%s: %zu bytes\n", fw_name, rdev->mc_fw->size);
++		} else {
++			err = radeon_ucode_validate(rdev->mc_fw);
++			if (err) {
++				printk(KERN_ERR
++				       "cik_fw: validation failed for firmware \"%s\"\n",
++				       fw_name);
+ 				goto out;
++			} else {
++				new_fw++;
++			}
+ 		}
+-		if ((rdev->mc_fw->size != mc_req_size) &&
+-		    (rdev->mc_fw->size != mc2_req_size)){
+-			printk(KERN_ERR
+-			       "cik_mc: Bogus length %zu in firmware \"%s\"\n",
+-			       rdev->mc_fw->size, fw_name);
+-			err = -EINVAL;
+-		}
+-		DRM_INFO("%s: %zu bytes\n", fw_name, rdev->mc_fw->size);
+ 
+-		snprintf(fw_name, sizeof(fw_name), "radeon/%s_smc.bin", chip_name);
++		snprintf(fw_name, sizeof(fw_name), "radeon/%s_smc.bin", new_chip_name);
+ 		err = request_firmware(&rdev->smc_fw, fw_name, rdev->dev);
+ 		if (err) {
+-			printk(KERN_ERR
+-			       "smc: error loading firmware \"%s\"\n",
+-			       fw_name);
+-			release_firmware(rdev->smc_fw);
+-			rdev->smc_fw = NULL;
+-			err = 0;
+-		} else if (rdev->smc_fw->size != smc_req_size) {
+-			printk(KERN_ERR
+-			       "cik_smc: Bogus length %zu in firmware \"%s\"\n",
+-			       rdev->smc_fw->size, fw_name);
+-			err = -EINVAL;
++			snprintf(fw_name, sizeof(fw_name), "radeon/%s_smc.bin", chip_name);
++			err = request_firmware(&rdev->smc_fw, fw_name, rdev->dev);
++			if (err) {
++				printk(KERN_ERR
++				       "smc: error loading firmware \"%s\"\n",
++				       fw_name);
++				release_firmware(rdev->smc_fw);
++				rdev->smc_fw = NULL;
++				err = 0;
++			} else if (rdev->smc_fw->size != smc_req_size) {
++				printk(KERN_ERR
++				       "cik_smc: Bogus length %zu in firmware \"%s\"\n",
++				       rdev->smc_fw->size, fw_name);
++				err = -EINVAL;
++			}
++		} else {
++			err = radeon_ucode_validate(rdev->smc_fw);
++			if (err) {
++				printk(KERN_ERR
++				       "cik_fw: validation failed for firmware \"%s\"\n",
++				       fw_name);
++				goto out;
++			} else {
++				new_fw++;
++			}
+ 		}
+ 	}
+ 
++	if (new_fw == 0) {
++		rdev->new_fw = false;
++	} else if (new_fw < num_fw) {
++		printk(KERN_ERR "ci_fw: mixing new and old firmware!\n");
++		err = -EINVAL;
++	} else {
++		rdev->new_fw = true;
++	}
++
+ out:
+ 	if (err) {
+ 		if (err != -EINVAL)
+@@ -7798,23 +8315,27 @@ restart_ih:
+ 		case 1: /* D1 vblank/vline */
+ 			switch (src_data) {
+ 			case 0: /* D1 vblank */
+-				if (rdev->irq.stat_regs.cik.disp_int & LB_D1_VBLANK_INTERRUPT) {
+-					if (rdev->irq.crtc_vblank_int[0]) {
+-						drm_handle_vblank(rdev->ddev, 0);
+-						rdev->pm.vblank_sync = true;
+-						wake_up(&rdev->irq.vblank_queue);
+-					}
+-					if (atomic_read(&rdev->irq.pflip[0]))
+-						radeon_crtc_handle_flip(rdev, 0);
+-					rdev->irq.stat_regs.cik.disp_int &= ~LB_D1_VBLANK_INTERRUPT;
+-					DRM_DEBUG("IH: D1 vblank\n");
++				if (!(rdev->irq.stat_regs.cik.disp_int & LB_D1_VBLANK_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				if (rdev->irq.crtc_vblank_int[0]) {
++					drm_handle_vblank(rdev->ddev, 0);
++					rdev->pm.vblank_sync = true;
++					wake_up(&rdev->irq.vblank_queue);
+ 				}
++				if (atomic_read(&rdev->irq.pflip[0]))
++					radeon_crtc_handle_vblank(rdev, 0);
++				rdev->irq.stat_regs.cik.disp_int &= ~LB_D1_VBLANK_INTERRUPT;
++				DRM_DEBUG("IH: D1 vblank\n");
++
+ 				break;
+ 			case 1: /* D1 vline */
+-				if (rdev->irq.stat_regs.cik.disp_int & LB_D1_VLINE_INTERRUPT) {
+-					rdev->irq.stat_regs.cik.disp_int &= ~LB_D1_VLINE_INTERRUPT;
+-					DRM_DEBUG("IH: D1 vline\n");
+-				}
++				if (!(rdev->irq.stat_regs.cik.disp_int & LB_D1_VLINE_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				rdev->irq.stat_regs.cik.disp_int &= ~LB_D1_VLINE_INTERRUPT;
++				DRM_DEBUG("IH: D1 vline\n");
++
+ 				break;
+ 			default:
+ 				DRM_DEBUG("Unhandled interrupt: %d %d\n", src_id, src_data);
+@@ -7824,23 +8345,27 @@ restart_ih:
+ 		case 2: /* D2 vblank/vline */
+ 			switch (src_data) {
+ 			case 0: /* D2 vblank */
+-				if (rdev->irq.stat_regs.cik.disp_int_cont & LB_D2_VBLANK_INTERRUPT) {
+-					if (rdev->irq.crtc_vblank_int[1]) {
+-						drm_handle_vblank(rdev->ddev, 1);
+-						rdev->pm.vblank_sync = true;
+-						wake_up(&rdev->irq.vblank_queue);
+-					}
+-					if (atomic_read(&rdev->irq.pflip[1]))
+-						radeon_crtc_handle_flip(rdev, 1);
+-					rdev->irq.stat_regs.cik.disp_int_cont &= ~LB_D2_VBLANK_INTERRUPT;
+-					DRM_DEBUG("IH: D2 vblank\n");
++				if (!(rdev->irq.stat_regs.cik.disp_int_cont & LB_D2_VBLANK_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				if (rdev->irq.crtc_vblank_int[1]) {
++					drm_handle_vblank(rdev->ddev, 1);
++					rdev->pm.vblank_sync = true;
++					wake_up(&rdev->irq.vblank_queue);
+ 				}
++				if (atomic_read(&rdev->irq.pflip[1]))
++					radeon_crtc_handle_vblank(rdev, 1);
++				rdev->irq.stat_regs.cik.disp_int_cont &= ~LB_D2_VBLANK_INTERRUPT;
++				DRM_DEBUG("IH: D2 vblank\n");
++
+ 				break;
+ 			case 1: /* D2 vline */
+-				if (rdev->irq.stat_regs.cik.disp_int_cont & LB_D2_VLINE_INTERRUPT) {
+-					rdev->irq.stat_regs.cik.disp_int_cont &= ~LB_D2_VLINE_INTERRUPT;
+-					DRM_DEBUG("IH: D2 vline\n");
+-				}
++				if (!(rdev->irq.stat_regs.cik.disp_int_cont & LB_D2_VLINE_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				rdev->irq.stat_regs.cik.disp_int_cont &= ~LB_D2_VLINE_INTERRUPT;
++				DRM_DEBUG("IH: D2 vline\n");
++
+ 				break;
+ 			default:
+ 				DRM_DEBUG("Unhandled interrupt: %d %d\n", src_id, src_data);
+@@ -7850,23 +8375,27 @@ restart_ih:
+ 		case 3: /* D3 vblank/vline */
+ 			switch (src_data) {
+ 			case 0: /* D3 vblank */
+-				if (rdev->irq.stat_regs.cik.disp_int_cont2 & LB_D3_VBLANK_INTERRUPT) {
+-					if (rdev->irq.crtc_vblank_int[2]) {
+-						drm_handle_vblank(rdev->ddev, 2);
+-						rdev->pm.vblank_sync = true;
+-						wake_up(&rdev->irq.vblank_queue);
+-					}
+-					if (atomic_read(&rdev->irq.pflip[2]))
+-						radeon_crtc_handle_flip(rdev, 2);
+-					rdev->irq.stat_regs.cik.disp_int_cont2 &= ~LB_D3_VBLANK_INTERRUPT;
+-					DRM_DEBUG("IH: D3 vblank\n");
++				if (!(rdev->irq.stat_regs.cik.disp_int_cont2 & LB_D3_VBLANK_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				if (rdev->irq.crtc_vblank_int[2]) {
++					drm_handle_vblank(rdev->ddev, 2);
++					rdev->pm.vblank_sync = true;
++					wake_up(&rdev->irq.vblank_queue);
+ 				}
++				if (atomic_read(&rdev->irq.pflip[2]))
++					radeon_crtc_handle_vblank(rdev, 2);
++				rdev->irq.stat_regs.cik.disp_int_cont2 &= ~LB_D3_VBLANK_INTERRUPT;
++				DRM_DEBUG("IH: D3 vblank\n");
++
+ 				break;
+ 			case 1: /* D3 vline */
+-				if (rdev->irq.stat_regs.cik.disp_int_cont2 & LB_D3_VLINE_INTERRUPT) {
+-					rdev->irq.stat_regs.cik.disp_int_cont2 &= ~LB_D3_VLINE_INTERRUPT;
+-					DRM_DEBUG("IH: D3 vline\n");
+-				}
++				if (!(rdev->irq.stat_regs.cik.disp_int_cont2 & LB_D3_VLINE_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				rdev->irq.stat_regs.cik.disp_int_cont2 &= ~LB_D3_VLINE_INTERRUPT;
++				DRM_DEBUG("IH: D3 vline\n");
++
+ 				break;
+ 			default:
+ 				DRM_DEBUG("Unhandled interrupt: %d %d\n", src_id, src_data);
+@@ -7876,23 +8405,27 @@ restart_ih:
+ 		case 4: /* D4 vblank/vline */
+ 			switch (src_data) {
+ 			case 0: /* D4 vblank */
+-				if (rdev->irq.stat_regs.cik.disp_int_cont3 & LB_D4_VBLANK_INTERRUPT) {
+-					if (rdev->irq.crtc_vblank_int[3]) {
+-						drm_handle_vblank(rdev->ddev, 3);
+-						rdev->pm.vblank_sync = true;
+-						wake_up(&rdev->irq.vblank_queue);
+-					}
+-					if (atomic_read(&rdev->irq.pflip[3]))
+-						radeon_crtc_handle_flip(rdev, 3);
+-					rdev->irq.stat_regs.cik.disp_int_cont3 &= ~LB_D4_VBLANK_INTERRUPT;
+-					DRM_DEBUG("IH: D4 vblank\n");
++				if (!(rdev->irq.stat_regs.cik.disp_int_cont3 & LB_D4_VBLANK_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				if (rdev->irq.crtc_vblank_int[3]) {
++					drm_handle_vblank(rdev->ddev, 3);
++					rdev->pm.vblank_sync = true;
++					wake_up(&rdev->irq.vblank_queue);
+ 				}
++				if (atomic_read(&rdev->irq.pflip[3]))
++					radeon_crtc_handle_vblank(rdev, 3);
++				rdev->irq.stat_regs.cik.disp_int_cont3 &= ~LB_D4_VBLANK_INTERRUPT;
++				DRM_DEBUG("IH: D4 vblank\n");
++
+ 				break;
+ 			case 1: /* D4 vline */
+-				if (rdev->irq.stat_regs.cik.disp_int_cont3 & LB_D4_VLINE_INTERRUPT) {
+-					rdev->irq.stat_regs.cik.disp_int_cont3 &= ~LB_D4_VLINE_INTERRUPT;
+-					DRM_DEBUG("IH: D4 vline\n");
+-				}
++				if (!(rdev->irq.stat_regs.cik.disp_int_cont3 & LB_D4_VLINE_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				rdev->irq.stat_regs.cik.disp_int_cont3 &= ~LB_D4_VLINE_INTERRUPT;
++				DRM_DEBUG("IH: D4 vline\n");
++
+ 				break;
+ 			default:
+ 				DRM_DEBUG("Unhandled interrupt: %d %d\n", src_id, src_data);
+@@ -7902,23 +8435,27 @@ restart_ih:
+ 		case 5: /* D5 vblank/vline */
+ 			switch (src_data) {
+ 			case 0: /* D5 vblank */
+-				if (rdev->irq.stat_regs.cik.disp_int_cont4 & LB_D5_VBLANK_INTERRUPT) {
+-					if (rdev->irq.crtc_vblank_int[4]) {
+-						drm_handle_vblank(rdev->ddev, 4);
+-						rdev->pm.vblank_sync = true;
+-						wake_up(&rdev->irq.vblank_queue);
+-					}
+-					if (atomic_read(&rdev->irq.pflip[4]))
+-						radeon_crtc_handle_flip(rdev, 4);
+-					rdev->irq.stat_regs.cik.disp_int_cont4 &= ~LB_D5_VBLANK_INTERRUPT;
+-					DRM_DEBUG("IH: D5 vblank\n");
++				if (!(rdev->irq.stat_regs.cik.disp_int_cont4 & LB_D5_VBLANK_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				if (rdev->irq.crtc_vblank_int[4]) {
++					drm_handle_vblank(rdev->ddev, 4);
++					rdev->pm.vblank_sync = true;
++					wake_up(&rdev->irq.vblank_queue);
+ 				}
++				if (atomic_read(&rdev->irq.pflip[4]))
++					radeon_crtc_handle_vblank(rdev, 4);
++				rdev->irq.stat_regs.cik.disp_int_cont4 &= ~LB_D5_VBLANK_INTERRUPT;
++				DRM_DEBUG("IH: D5 vblank\n");
++
+ 				break;
+ 			case 1: /* D5 vline */
+-				if (rdev->irq.stat_regs.cik.disp_int_cont4 & LB_D5_VLINE_INTERRUPT) {
+-					rdev->irq.stat_regs.cik.disp_int_cont4 &= ~LB_D5_VLINE_INTERRUPT;
+-					DRM_DEBUG("IH: D5 vline\n");
+-				}
++				if (!(rdev->irq.stat_regs.cik.disp_int_cont4 & LB_D5_VLINE_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				rdev->irq.stat_regs.cik.disp_int_cont4 &= ~LB_D5_VLINE_INTERRUPT;
++				DRM_DEBUG("IH: D5 vline\n");
++
+ 				break;
+ 			default:
+ 				DRM_DEBUG("Unhandled interrupt: %d %d\n", src_id, src_data);
+@@ -7928,23 +8465,27 @@ restart_ih:
+ 		case 6: /* D6 vblank/vline */
+ 			switch (src_data) {
+ 			case 0: /* D6 vblank */
+-				if (rdev->irq.stat_regs.cik.disp_int_cont5 & LB_D6_VBLANK_INTERRUPT) {
+-					if (rdev->irq.crtc_vblank_int[5]) {
+-						drm_handle_vblank(rdev->ddev, 5);
+-						rdev->pm.vblank_sync = true;
+-						wake_up(&rdev->irq.vblank_queue);
+-					}
+-					if (atomic_read(&rdev->irq.pflip[5]))
+-						radeon_crtc_handle_flip(rdev, 5);
+-					rdev->irq.stat_regs.cik.disp_int_cont5 &= ~LB_D6_VBLANK_INTERRUPT;
+-					DRM_DEBUG("IH: D6 vblank\n");
++				if (!(rdev->irq.stat_regs.cik.disp_int_cont5 & LB_D6_VBLANK_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				if (rdev->irq.crtc_vblank_int[5]) {
++					drm_handle_vblank(rdev->ddev, 5);
++					rdev->pm.vblank_sync = true;
++					wake_up(&rdev->irq.vblank_queue);
+ 				}
++				if (atomic_read(&rdev->irq.pflip[5]))
++					radeon_crtc_handle_vblank(rdev, 5);
++				rdev->irq.stat_regs.cik.disp_int_cont5 &= ~LB_D6_VBLANK_INTERRUPT;
++				DRM_DEBUG("IH: D6 vblank\n");
++
+ 				break;
+ 			case 1: /* D6 vline */
+-				if (rdev->irq.stat_regs.cik.disp_int_cont5 & LB_D6_VLINE_INTERRUPT) {
+-					rdev->irq.stat_regs.cik.disp_int_cont5 &= ~LB_D6_VLINE_INTERRUPT;
+-					DRM_DEBUG("IH: D6 vline\n");
+-				}
++				if (!(rdev->irq.stat_regs.cik.disp_int_cont5 & LB_D6_VLINE_INTERRUPT))
++					DRM_DEBUG("IH: IH event w/o asserted irq bit?\n");
++
++				rdev->irq.stat_regs.cik.disp_int_cont5 &= ~LB_D6_VLINE_INTERRUPT;
++				DRM_DEBUG("IH: D6 vline\n");
++
+ 				break;
+ 			default:
+ 				DRM_DEBUG("Unhandled interrupt: %d %d\n", src_id, src_data);
+@@ -9833,7 +10475,8 @@ static void cik_program_aspm(struct rade
+ 			if (orig != data)
+ 				WREG32_PCIE_PORT(PCIE_LC_LINK_WIDTH_CNTL, data);
+ 
+-			if (!disable_clkreq) {
++			if (!disable_clkreq &&
++			    !pci_is_root_bus(rdev->pdev->bus)) {
+ 				struct pci_dev *root = rdev->pdev->bus->self;
+ 				u32 lnkcap;
+ 

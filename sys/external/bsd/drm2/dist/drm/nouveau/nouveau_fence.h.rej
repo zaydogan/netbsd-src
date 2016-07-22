@@ -1,0 +1,20 @@
+--- nouveau/nouveau_fence.h	2016-07-22 15:48:08.000000000 +0900
++++ nouveau/nouveau_fence.h	2016-07-12 01:31:24.000000000 +0900
+@@ -57,14 +65,15 @@ struct nouveau_fence_priv {
+ 	int  (*context_new)(struct nouveau_channel *);
+ 	void (*context_del)(struct nouveau_channel *);
+ 
+-	wait_queue_head_t waiting;
++	u32 contexts, context_base;
+ 	bool uevent;
+ };
+ 
+ #define nouveau_fence(drm) ((struct nouveau_fence_priv *)(drm)->fence)
+ 
+-void nouveau_fence_context_new(struct nouveau_fence_chan *);
++void nouveau_fence_context_new(struct nouveau_channel *, struct nouveau_fence_chan *);
+ void nouveau_fence_context_del(struct nouveau_fence_chan *);
++void nouveau_fence_context_free(struct nouveau_fence_chan *);
+ 
+ int nv04_fence_create(struct nouveau_drm *);
+ int nv04_fence_mthd(struct nouveau_channel *, u32, u32, u32);

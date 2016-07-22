@@ -1,0 +1,126 @@
+--- nouveau/nouveau_bo.c	2016-07-22 15:48:08.000000000 +0900
++++ nouveau/nouveau_bo.c	2016-07-12 01:31:24.000000000 +0900
+@@ -501,27 +590,41 @@ nouveau_bo_validate(struct nouveau_bo *n
+ 	if (ret)
+ 		return ret;
+ 
++	nouveau_bo_sync_for_device(nvbo);
++
+ 	return 0;
+ }
+ 
+-u16
+-nouveau_bo_rd16(struct nouveau_bo *nvbo, unsigned index)
++static inline void *
++_nouveau_bo_mem_index(struct nouveau_bo *nvbo, unsigned index, void *mem, u8 sz)
+ {
+-	bool is_iomem;
+-	u16 *mem = ttm_kmap_obj_virtual(&nvbo->kmap, &is_iomem);
+-	mem = &mem[index];
+-	if (is_iomem)
+-		return ioread16_native((void __force __iomem *)mem);
+-	else
+-		return *mem;
++	struct ttm_dma_tt *dma_tt;
++	u8 *m = mem;
++
++	index *= sz;
++
++	if (m) {
++		/* kmap'd address, return the corresponding offset */
++		m += index;
++	} else {
++		/* DMA-API mapping, lookup the right address */
++		dma_tt = (struct ttm_dma_tt *)nvbo->bo.ttm;
++		m = dma_tt->cpu_address[index / PAGE_SIZE];
++		m += index % PAGE_SIZE;
++	}
++
++	return m;
+ }
++#define nouveau_bo_mem_index(o, i, m) _nouveau_bo_mem_index(o, i, m, sizeof(*m))
+ 
+ void
+ nouveau_bo_wr16(struct nouveau_bo *nvbo, unsigned index, u16 val)
+ {
+ 	bool is_iomem;
+ 	u16 *mem = ttm_kmap_obj_virtual(&nvbo->kmap, &is_iomem);
+-	mem = &mem[index];
++
++	mem = nouveau_bo_mem_index(nvbo, index, mem);
++
+ 	if (is_iomem)
+ 		iowrite16_native(val, (void __force __iomem *)mem);
+ 	else
+@@ -1451,8 +1585,9 @@ nouveau_ttm_tt_populate(struct ttm_tt *t
+ {
+ 	struct ttm_dma_tt *ttm_dma = (void *)ttm;
+ 	struct nouveau_drm *drm;
+-	struct nouveau_device *device;
++	struct nvkm_device *device;
+ 	struct drm_device *dev;
++	struct device *pdev;
+ 	unsigned i;
+ 	int r;
+ 	bool slave = !!(ttm->page_flags & TTM_PAGE_FLAG_SG);
+@@ -1469,11 +1604,20 @@ nouveau_ttm_tt_populate(struct ttm_tt *t
+ 	}
+ 
+ 	drm = nouveau_bdev(ttm->bdev);
+-	device = nv_device(drm->device);
++	device = nvxx_device(&drm->device);
+ 	dev = drm->dev;
++	pdev = device->dev;
+ 
+-#if __OS_HAS_AGP
+-	if (drm->agp.stat == ENABLED) {
++	/*
++	 * Objects matching this condition have been marked as force_coherent,
++	 * so use the DMA API for them.
++	 */
++	if (!nvxx_device(&drm->device)->func->cpu_coherent &&
++	    ttm->caching_state == tt_uncached)
++		return ttm_dma_populate(ttm_dma, dev->dev);
++
++#if IS_ENABLED(CONFIG_AGP)
++	if (drm->agp.bridge) {
+ 		return ttm_agp_tt_populate(ttm);
+ 	}
+ #endif
+@@ -1515,8 +1664,9 @@ nouveau_ttm_tt_unpopulate(struct ttm_tt 
+ {
+ 	struct ttm_dma_tt *ttm_dma = (void *)ttm;
+ 	struct nouveau_drm *drm;
+-	struct nouveau_device *device;
++	struct nvkm_device *device;
+ 	struct drm_device *dev;
++	struct device *pdev;
+ 	unsigned i;
+ 	bool slave = !!(ttm->page_flags & TTM_PAGE_FLAG_SG);
+ 
+@@ -1524,11 +1674,22 @@ nouveau_ttm_tt_unpopulate(struct ttm_tt 
+ 		return;
+ 
+ 	drm = nouveau_bdev(ttm->bdev);
+-	device = nv_device(drm->device);
++	device = nvxx_device(&drm->device);
+ 	dev = drm->dev;
++	pdev = device->dev;
+ 
+-#if __OS_HAS_AGP
+-	if (drm->agp.stat == ENABLED) {
++	/*
++	 * Objects matching this condition have been marked as force_coherent,
++	 * so use the DMA API for them.
++	 */
++	if (!nvxx_device(&drm->device)->func->cpu_coherent &&
++	    ttm->caching_state == tt_uncached) {
++		ttm_dma_unpopulate(ttm_dma, dev->dev);
++		return;
++	}
++
++#if IS_ENABLED(CONFIG_AGP)
++	if (drm->agp.bridge) {
+ 		ttm_agp_tt_unpopulate(ttm);
+ 		return;
+ 	}

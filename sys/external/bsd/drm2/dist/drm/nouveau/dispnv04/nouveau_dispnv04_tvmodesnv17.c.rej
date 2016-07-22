@@ -1,0 +1,11 @@
+--- nouveau/dispnv04/nouveau_dispnv04_tvmodesnv17.c	2016-07-22 15:48:08.000000000 +0900
++++ nouveau/dispnv04/nouveau_dispnv04_tvmodesnv17.c	2016-07-12 01:31:24.000000000 +0900
+@@ -32,7 +32,7 @@
+ #include "hw.h"
+ #include "tvnv17.h"
+ 
+-char *nv17_tv_norm_names[NUM_TV_NORMS] = {
++const char * const nv17_tv_norm_names[NUM_TV_NORMS] = {
+ 	[TV_NORM_PAL] = "PAL",
+ 	[TV_NORM_PAL_M] = "PAL-M",
+ 	[TV_NORM_PAL_N] = "PAL-N",

@@ -1,0 +1,46 @@
+--- ttm/ttm_bo_util.c	2016-07-22 15:48:08.000000000 +0900
++++ ttm/ttm_bo_util.c	2016-07-12 01:31:24.000000000 +0900
+@@ -37,6 +37,7 @@
+ #include <linux/slab.h>
+ #include <linux/vmalloc.h>
+ #include <linux/module.h>
++#include <linux/reservation.h>
+ 
+ void ttm_bo_free_old_node(struct ttm_buffer_object *bo)
+ {
+@@ -479,28 +472,25 @@ static int ttm_buffer_object_transfer(st
+ 
+ pgprot_t ttm_io_prot(uint32_t caching_flags, pgprot_t tmp)
+ {
++	/* Cached mappings need no adjustment */
++	if (caching_flags & TTM_PL_FLAG_CACHED)
++		return tmp;
++
+ #if defined(__i386__) || defined(__x86_64__)
+ 	if (caching_flags & TTM_PL_FLAG_WC)
+ 		tmp = pgprot_writecombine(tmp);
+ 	else if (boot_cpu_data.x86 > 3)
+ 		tmp = pgprot_noncached(tmp);
+-
+-#elif defined(__powerpc__)
+-	if (!(caching_flags & TTM_PL_FLAG_CACHED)) {
+-		pgprot_val(tmp) |= _PAGE_NO_CACHE;
+-		if (caching_flags & TTM_PL_FLAG_UNCACHED)
+-			pgprot_val(tmp) |= _PAGE_GUARDED;
+-	}
+ #endif
+-#if defined(__ia64__)
++#if defined(__ia64__) || defined(__arm__) || defined(__aarch64__) || \
++    defined(__powerpc__)
+ 	if (caching_flags & TTM_PL_FLAG_WC)
+ 		tmp = pgprot_writecombine(tmp);
+ 	else
+ 		tmp = pgprot_noncached(tmp);
+ #endif
+ #if defined(__sparc__) || defined(__mips__)
+-	if (!(caching_flags & TTM_PL_FLAG_CACHED))
+-		tmp = pgprot_noncached(tmp);
++	tmp = pgprot_noncached(tmp);
+ #endif
+ 	return tmp;
+ }

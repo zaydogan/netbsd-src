@@ -1,0 +1,251 @@
+--- radeon/r600_hdmi.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/r600_hdmi.c	2016-07-12 01:31:24.000000000 +0900
+@@ -56,116 +57,168 @@ enum r600_hdmi_iec_status_bits {
+ 	AUDIO_STATUS_LEVEL        = 0x80
+ };
+ 
+-static const struct radeon_hdmi_acr r600_hdmi_predefined_acr[] = {
+-    /*	     32kHz	  44.1kHz	48kHz    */
+-    /* Clock      N     CTS      N     CTS      N     CTS */
+-    {  25175,  4096,  25175, 28224, 125875,  6144,  25175 }, /*  25,20/1.001 MHz */
+-    {  25200,  4096,  25200,  6272,  28000,  6144,  25200 }, /*  25.20       MHz */
+-    {  27000,  4096,  27000,  6272,  30000,  6144,  27000 }, /*  27.00       MHz */
+-    {  27027,  4096,  27027,  6272,  30030,  6144,  27027 }, /*  27.00*1.001 MHz */
+-    {  54000,  4096,  54000,  6272,  60000,  6144,  54000 }, /*  54.00       MHz */
+-    {  54054,  4096,  54054,  6272,  60060,  6144,  54054 }, /*  54.00*1.001 MHz */
+-    {  74176,  4096,  74176,  5733,  75335,  6144,  74176 }, /*  74.25/1.001 MHz */
+-    {  74250,  4096,  74250,  6272,  82500,  6144,  74250 }, /*  74.25       MHz */
+-    { 148352,  4096, 148352,  5733, 150670,  6144, 148352 }, /* 148.50/1.001 MHz */
+-    { 148500,  4096, 148500,  6272, 165000,  6144, 148500 }, /* 148.50       MHz */
+-};
++static struct r600_audio_pin r600_audio_status(struct radeon_device *rdev)
++{
++	struct r600_audio_pin status;
++	uint32_t value;
+ 
++	value = RREG32(R600_AUDIO_RATE_BPS_CHANNEL);
+ 
+-/*
+- * calculate CTS and N values if they are not found in the table
+- */
+-static void r600_hdmi_calc_cts(uint32_t clock, int *CTS, int *N, int freq)
+-{
+-	int n, cts;
+-	unsigned long div, mul;
++	/* number of channels */
++	status.channels = (value & 0x7) + 1;
++
++	/* bits per sample */
++	switch ((value & 0xF0) >> 4) {
++	case 0x0:
++		status.bits_per_sample = 8;
++		break;
++	case 0x1:
++		status.bits_per_sample = 16;
++		break;
++	case 0x2:
++		status.bits_per_sample = 20;
++		break;
++	case 0x3:
++		status.bits_per_sample = 24;
++		break;
++	case 0x4:
++		status.bits_per_sample = 32;
++		break;
++	default:
++		dev_err(rdev->dev, "Unknown bits per sample 0x%x, using 16\n",
++			(int)value);
++		status.bits_per_sample = 16;
++	}
+ 
+-	/* Safe, but overly large values */
+-	n = 128 * freq;
+-	cts = clock * 1000;
++	/* current sampling rate in HZ */
++	if (value & 0x4000)
++		status.rate = 44100;
++	else
++		status.rate = 48000;
++	status.rate *= ((value >> 11) & 0x7) + 1;
++	status.rate /= ((value >> 8) & 0x7) + 1;
+ 
+-	/* Smallest valid fraction */
+-	div = gcd(n, cts);
++	value = RREG32(R600_AUDIO_STATUS_BITS);
+ 
+-	n /= div;
+-	cts /= div;
++	/* iec 60958 status bits */
++	status.status_bits = value & 0xff;
+ 
+-	/*
+-	 * The optimal N is 128*freq/1000. Calculate the closest larger
+-	 * value that doesn't truncate any bits.
+-	 */
+-	mul = ((128*freq/1000) + (n-1))/n;
++	/* iec 60958 category code */
++	status.category_code = (value >> 8) & 0xff;
+ 
+-	n *= mul;
+-	cts *= mul;
++	return status;
++}
+ 
+-	/* Check that we are in spec (not always possible) */
+-	if (n < (128*freq/1500))
+-		printk(KERN_WARNING "Calculated ACR N value is too small. You may experience audio problems.\n");
+-	if (n > (128*freq/300))
+-		printk(KERN_WARNING "Calculated ACR N value is too large. You may experience audio problems.\n");
++/*
++ * update all hdmi interfaces with current audio parameters
++ */
++void r600_audio_update_hdmi(struct work_struct *work)
++{
++	struct radeon_device *rdev = container_of(work, struct radeon_device,
++						  audio_work);
++	struct drm_device *dev = rdev->ddev;
++	struct r600_audio_pin audio_status = r600_audio_status(rdev);
++	struct drm_encoder *encoder;
++	bool changed = false;
+ 
+-	*N = n;
+-	*CTS = cts;
++	if (rdev->audio.pin[0].channels != audio_status.channels ||
++	    rdev->audio.pin[0].rate != audio_status.rate ||
++	    rdev->audio.pin[0].bits_per_sample != audio_status.bits_per_sample ||
++	    rdev->audio.pin[0].status_bits != audio_status.status_bits ||
++	    rdev->audio.pin[0].category_code != audio_status.category_code) {
++		rdev->audio.pin[0] = audio_status;
++		changed = true;
++	}
+ 
+-	DRM_DEBUG("Calculated ACR timing N=%d CTS=%d for frequency %d\n",
+-		  *N, *CTS, freq);
++	list_for_each_entry(encoder, &dev->mode_config.encoder_list, head) {
++		if (!radeon_encoder_is_digital(encoder))
++			continue;
++		if (changed || r600_hdmi_buffer_status_changed(encoder))
++			r600_hdmi_update_audio_settings(encoder);
++	}
+ }
+ 
+-struct radeon_hdmi_acr r600_hdmi_acr(uint32_t clock)
++/* enable the audio stream */
++void r600_audio_enable(struct radeon_device *rdev,
++		       struct r600_audio_pin *pin,
++		       u8 enable_mask)
+ {
+-	struct radeon_hdmi_acr res;
+-	u8 i;
++	u32 tmp = RREG32(AZ_HOT_PLUG_CONTROL);
++
++	if (!pin)
++		return;
+ 
+-	/* Precalculated values for common clocks */
+-	for (i = 0; i < ARRAY_SIZE(r600_hdmi_predefined_acr); i++) {
+-		if (r600_hdmi_predefined_acr[i].clock == clock)
+-			return r600_hdmi_predefined_acr[i];
++	if (enable_mask) {
++		tmp |= AUDIO_ENABLED;
++		if (enable_mask & 1)
++			tmp |= PIN0_AUDIO_ENABLED;
++		if (enable_mask & 2)
++			tmp |= PIN1_AUDIO_ENABLED;
++		if (enable_mask & 4)
++			tmp |= PIN2_AUDIO_ENABLED;
++		if (enable_mask & 8)
++			tmp |= PIN3_AUDIO_ENABLED;
++	} else {
++		tmp &= ~(AUDIO_ENABLED |
++			 PIN0_AUDIO_ENABLED |
++			 PIN1_AUDIO_ENABLED |
++			 PIN2_AUDIO_ENABLED |
++			 PIN3_AUDIO_ENABLED);
+ 	}
+ 
+-	/* And odd clocks get manually calculated */
+-	r600_hdmi_calc_cts(clock, &res.cts_32khz, &res.n_32khz, 32000);
+-	r600_hdmi_calc_cts(clock, &res.cts_44_1khz, &res.n_44_1khz, 44100);
+-	r600_hdmi_calc_cts(clock, &res.cts_48khz, &res.n_48khz, 48000);
++	WREG32(AZ_HOT_PLUG_CONTROL, tmp);
++}
+ 
+-	return res;
++struct r600_audio_pin *r600_audio_get_pin(struct radeon_device *rdev)
++{
++	/* only one pin on 6xx-NI */
++	return &rdev->audio.pin[0];
+ }
+ 
+-/*
+- * update the N and CTS parameters for a given pixel clock rate
+- */
+-static void r600_hdmi_update_ACR(struct drm_encoder *encoder, uint32_t clock)
++void r600_hdmi_update_acr(struct drm_encoder *encoder, long offset,
++	const struct radeon_hdmi_acr *acr)
+ {
+ 	struct drm_device *dev = encoder->dev;
+ 	struct radeon_device *rdev = dev->dev_private;
+-	struct radeon_hdmi_acr acr = r600_hdmi_acr(clock);
+-	struct radeon_encoder *radeon_encoder = to_radeon_encoder(encoder);
+-	struct radeon_encoder_atom_dig *dig = radeon_encoder->enc_priv;
+-	uint32_t offset = dig->afmt->offset;
+-
+-	WREG32(HDMI0_ACR_32_0 + offset, HDMI0_ACR_CTS_32(acr.cts_32khz));
+-	WREG32(HDMI0_ACR_32_1 + offset, acr.n_32khz);
+ 
+-	WREG32(HDMI0_ACR_44_0 + offset, HDMI0_ACR_CTS_44(acr.cts_44_1khz));
+-	WREG32(HDMI0_ACR_44_1 + offset, acr.n_44_1khz);
+-
+-	WREG32(HDMI0_ACR_48_0 + offset, HDMI0_ACR_CTS_48(acr.cts_48khz));
+-	WREG32(HDMI0_ACR_48_1 + offset, acr.n_48khz);
++	/* DCE 3.0 uses register that's normally for CRC_CONTROL */
++	uint32_t acr_ctl = ASIC_IS_DCE3(rdev) ? DCE3_HDMI0_ACR_PACKET_CONTROL :
++				       HDMI0_ACR_PACKET_CONTROL;
++	WREG32_P(acr_ctl + offset,
++		HDMI0_ACR_SOURCE |		/* select SW CTS value */
++		HDMI0_ACR_AUTO_SEND,	/* allow hw to sent ACR packets when required */
++		~(HDMI0_ACR_SOURCE |
++		HDMI0_ACR_AUTO_SEND));
++
++	WREG32_P(HDMI0_ACR_32_0 + offset,
++		HDMI0_ACR_CTS_32(acr->cts_32khz),
++		~HDMI0_ACR_CTS_32_MASK);
++	WREG32_P(HDMI0_ACR_32_1 + offset,
++		HDMI0_ACR_N_32(acr->n_32khz),
++		~HDMI0_ACR_N_32_MASK);
++
++	WREG32_P(HDMI0_ACR_44_0 + offset,
++		HDMI0_ACR_CTS_44(acr->cts_44_1khz),
++		~HDMI0_ACR_CTS_44_MASK);
++	WREG32_P(HDMI0_ACR_44_1 + offset,
++		HDMI0_ACR_N_44(acr->n_44_1khz),
++		~HDMI0_ACR_N_44_MASK);
++
++	WREG32_P(HDMI0_ACR_48_0 + offset,
++		HDMI0_ACR_CTS_48(acr->cts_48khz),
++		~HDMI0_ACR_CTS_48_MASK);
++	WREG32_P(HDMI0_ACR_48_1 + offset,
++		HDMI0_ACR_N_48(acr->n_48khz),
++		~HDMI0_ACR_N_48_MASK);
+ }
+ 
+ /*
+  * build a HDMI Video Info Frame
+  */
+-static void r600_hdmi_update_avi_infoframe(struct drm_encoder *encoder,
+-					   void *buffer, size_t size)
++void r600_set_avi_packet(struct radeon_device *rdev, u32 offset,
++    unsigned char *buffer, size_t size)
+ {
+-	struct drm_device *dev = encoder->dev;
+-	struct radeon_device *rdev = dev->dev_private;
+-	struct radeon_encoder *radeon_encoder = to_radeon_encoder(encoder);
+-	struct radeon_encoder_atom_dig *dig = radeon_encoder->enc_priv;
+-	uint32_t offset = dig->afmt->offset;
+ 	uint8_t *frame = buffer + 3;
+-	uint8_t *header = buffer;
+ 
+ 	WREG32(HDMI0_AVI_INFO0 + offset,
+ 		frame[0x0] | (frame[0x1] << 8) | (frame[0x2] << 16) | (frame[0x3] << 24));

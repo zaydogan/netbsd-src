@@ -325,45 +325,93 @@ nouveau_fence_wait(struct nouveau_fence *fence, bool lazy, bool intr)
 }
 
 int
-nouveau_fence_sync(struct nouveau_fence *fence, struct nouveau_channel *chan)
+nouveau_fence_wait(struct nouveau_fence *fence, bool lazy, bool intr)
+{
+	long ret;
+
+	if (!lazy)
+		return nouveau_fence_wait_busy(fence, intr);
+
+	ret = fence_wait_timeout(&fence->base, intr, 15 * HZ);
+	if (ret < 0)
+		return ret;
+	else if (!ret)
+		return -EBUSY;
+	else
+		return 0;
+}
+
+int
+nouveau_fence_sync(struct nouveau_bo *nvbo, struct nouveau_channel *chan, bool exclusive, bool intr)
 {
 	struct nouveau_fence_chan *fctx = chan->fence;
-	struct nouveau_channel *prev;
-	int ret = 0;
+	struct fence *fence;
+	struct reservation_object *resv = nvbo->bo.resv;
+	struct reservation_object_list *fobj;
+	struct nouveau_fence *f;
+	int ret = 0, i;
 
-	prev = fence ? fence->channel : NULL;
-	if (prev) {
-		if (unlikely(prev != chan && !nouveau_fence_done(fence))) {
-			ret = fctx->sync(fence, prev, chan);
-			if (unlikely(ret))
-				ret = nouveau_fence_wait(fence, true, false);
+	if (!exclusive) {
+		ret = reservation_object_reserve_shared(resv);
+
+		if (ret)
+			return ret;
+	}
+
+	fobj = reservation_object_get_list(resv);
+	fence = reservation_object_get_excl(resv);
+
+	if (fence && (!exclusive || !fobj || !fobj->shared_count)) {
+		struct nouveau_channel *prev = NULL;
+		bool must_wait = true;
+
+		f = nouveau_local_fence(fence, chan->drm);
+		if (f) {
+			rcu_read_lock();
+			prev = rcu_dereference(f->channel);
+			if (prev && (prev == chan || fctx->sync(f, prev, chan) == 0))
+				must_wait = false;
+			rcu_read_unlock();
 		}
+
+		if (must_wait)
+			ret = fence_wait(fence, intr);
+
+		return ret;
+	}
+
+	if (!exclusive || !fobj)
+		return ret;
+
+	for (i = 0; i < fobj->shared_count && !ret; ++i) {
+		struct nouveau_channel *prev = NULL;
+		bool must_wait = true;
+
+		fence = rcu_dereference_protected(fobj->shared[i],
+						reservation_object_held(resv));
+
+		f = nouveau_local_fence(fence, chan->drm);
+		if (f) {
+			rcu_read_lock();
+			prev = rcu_dereference(f->channel);
+			if (prev && (prev == chan || fctx->sync(f, prev, chan) == 0))
+				must_wait = false;
+			rcu_read_unlock();
+		}
+
+		if (must_wait)
+			ret = fence_wait(fence, intr);
 	}
 
 	return ret;
-}
-
-static void
-nouveau_fence_del(struct kref *kref)
-{
-	struct nouveau_fence *fence = container_of(kref, typeof(*fence), kref);
-	kfree(fence);
 }
 
 void
 nouveau_fence_unref(struct nouveau_fence **pfence)
 {
 	if (*pfence)
-		kref_put(&(*pfence)->kref, nouveau_fence_del);
+		fence_put(&(*pfence)->base);
 	*pfence = NULL;
-}
-
-struct nouveau_fence *
-nouveau_fence_ref(struct nouveau_fence *fence)
-{
-	if (fence)
-		kref_get(&fence->kref);
-	return fence;
 }
 
 int
@@ -380,9 +428,7 @@ nouveau_fence_new(struct nouveau_channel *chan, bool sysmem,
 	if (!fence)
 		return -ENOMEM;
 
-	INIT_LIST_HEAD(&fence->work);
 	fence->sysmem = sysmem;
-	kref_init(&fence->kref);
 
 	ret = nouveau_fence_emit(fence, chan);
 	if (ret)
@@ -391,3 +437,108 @@ nouveau_fence_new(struct nouveau_channel *chan, bool sysmem,
 	*pfence = fence;
 	return ret;
 }
+
+static const char *nouveau_fence_get_get_driver_name(struct fence *fence)
+{
+	return "nouveau";
+}
+
+static const char *nouveau_fence_get_timeline_name(struct fence *f)
+{
+	struct nouveau_fence *fence = from_fence(f);
+	struct nouveau_fence_chan *fctx = nouveau_fctx(fence);
+
+	return !fctx->dead ? fctx->name : "dead channel";
+}
+
+/*
+ * In an ideal world, read would not assume the channel context is still alive.
+ * This function may be called from another device, running into free memory as a
+ * result. The drm node should still be there, so we can derive the index from
+ * the fence context.
+ */
+static bool nouveau_fence_is_signaled(struct fence *f)
+{
+	struct nouveau_fence *fence = from_fence(f);
+	struct nouveau_fence_chan *fctx = nouveau_fctx(fence);
+	struct nouveau_channel *chan;
+	bool ret = false;
+
+	rcu_read_lock();
+	chan = rcu_dereference(fence->channel);
+	if (chan)
+		ret = (int)(fctx->read(chan) - fence->base.seqno) >= 0;
+	rcu_read_unlock();
+
+	return ret;
+}
+
+static bool nouveau_fence_no_signaling(struct fence *f)
+{
+	struct nouveau_fence *fence = from_fence(f);
+
+	/*
+	 * caller should have a reference on the fence,
+	 * else fence could get freed here
+	 */
+	WARN_ON(atomic_read(&fence->base.refcount.refcount) <= 1);
+
+	/*
+	 * This needs uevents to work correctly, but fence_add_callback relies on
+	 * being able to enable signaling. It will still get signaled eventually,
+	 * just not right away.
+	 */
+	if (nouveau_fence_is_signaled(f)) {
+		list_del(&fence->head);
+
+		fence_put(&fence->base);
+		return false;
+	}
+
+	return true;
+}
+
+static void nouveau_fence_release(struct fence *f)
+{
+	struct nouveau_fence *fence = from_fence(f);
+	struct nouveau_fence_chan *fctx = nouveau_fctx(fence);
+
+	kref_put(&fctx->fence_ref, nouveau_fence_context_put);
+	fence_free(&fence->base);
+}
+
+static const struct fence_ops nouveau_fence_ops_legacy = {
+	.get_driver_name = nouveau_fence_get_get_driver_name,
+	.get_timeline_name = nouveau_fence_get_timeline_name,
+	.enable_signaling = nouveau_fence_no_signaling,
+	.signaled = nouveau_fence_is_signaled,
+	.wait = nouveau_fence_wait_legacy,
+	.release = nouveau_fence_release
+};
+
+static bool nouveau_fence_enable_signaling(struct fence *f)
+{
+	struct nouveau_fence *fence = from_fence(f);
+	struct nouveau_fence_chan *fctx = nouveau_fctx(fence);
+	bool ret;
+
+	if (!fctx->notify_ref++)
+		nvif_notify_get(&fctx->notify);
+
+	ret = nouveau_fence_no_signaling(f);
+	if (ret)
+		set_bit(FENCE_FLAG_USER_BITS, &fence->base.flags);
+	else if (!--fctx->notify_ref)
+		nvif_notify_put(&fctx->notify);
+
+	return ret;
+}
+
+static const struct fence_ops nouveau_fence_ops_uevent = {
+	.get_driver_name = nouveau_fence_get_get_driver_name,
+	.get_timeline_name = nouveau_fence_get_timeline_name,
+	.enable_signaling = nouveau_fence_enable_signaling,
+	.signaled = nouveau_fence_is_signaled,
+	.wait = fence_default_wait,
+	.release = NULL
+};

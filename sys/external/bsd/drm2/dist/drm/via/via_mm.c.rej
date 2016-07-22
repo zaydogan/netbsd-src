@@ -1,0 +1,35 @@
+--- via/via_mm.c	2016-07-22 15:48:08.000000000 +0900
++++ via/via_mm.c	2016-07-12 01:31:24.000000000 +0900
+@@ -79,7 +79,7 @@ int via_final_context(struct drm_device 
+ 
+ 	/* Linux specific until context tracking code gets ported to BSD */
+ 	/* Last context, perform cleanup */
+-	if (list_is_singular(&dev->ctxlist) && dev->dev_private) {
++	if (list_is_singular(&dev->ctxlist)) {
+ 		DRM_DEBUG("Last Context\n");
+ 		drm_irq_uninstall(dev);
+ 		via_cleanup_futex(dev_priv);
+@@ -211,12 +211,12 @@ void via_reclaim_buffers_locked(struct d
+ 	if (!(file->minor->master && file->master->lock.hw_lock))
+ 		return;
+ 
+-	drm_idlelock_take(&file->master->lock);
++	drm_legacy_idlelock_take(&file->master->lock);
+ 
+ 	mutex_lock(&dev->struct_mutex);
+ 	if (list_empty(&file_priv->obj_list)) {
+ 		mutex_unlock(&dev->struct_mutex);
+-		drm_idlelock_release(&file->master->lock);
++		drm_legacy_idlelock_release(&file->master->lock);
+ 
+ 		return;
+ 	}
+@@ -231,7 +231,7 @@ void via_reclaim_buffers_locked(struct d
+ 	}
+ 	mutex_unlock(&dev->struct_mutex);
+ 
+-	drm_idlelock_release(&file->master->lock);
++	drm_legacy_idlelock_release(&file->master->lock);
+ 
+ 	return;
+ }

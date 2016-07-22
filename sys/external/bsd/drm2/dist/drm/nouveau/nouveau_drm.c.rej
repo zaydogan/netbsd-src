@@ -1,0 +1,562 @@
+--- nouveau/nouveau_drm.c	2016-07-22 15:48:08.000000000 +0900
++++ nouveau/nouveau_drm.c	2016-07-12 01:31:24.000000000 +0900
+@@ -51,6 +45,9 @@
+ #include "nouveau_fbcon.h"
+ #include "nouveau_fence.h"
+ #include "nouveau_debugfs.h"
++#include "nouveau_usif.h"
++#include "nouveau_connector.h"
++#include "nouveau_platform.h"
+ 
+ MODULE_PARM_DESC(config, "option string to pass to driver core");
+ static char *nouveau_config;
+@@ -73,7 +70,9 @@ MODULE_PARM_DESC(runpm, "disable (0), fo
+ int nouveau_runtime_pm = -1;
+ module_param_named(runpm, nouveau_runtime_pm, int, 0400);
+ 
+-static struct drm_driver driver;
++static struct drm_driver driver_stub;
++static struct drm_driver driver_pci;
++static struct drm_driver driver_platform;
+ 
+ static u64
+ nouveau_pci_name(struct pci_dev *pdev)
+@@ -100,43 +99,50 @@ nouveau_name(struct drm_device *dev)
+ }
+ 
+ static int
+-nouveau_cli_create(u64 name, const char *sname,
++nouveau_cli_create(struct drm_device *dev, const char *sname,
+ 		   int size, void **pcli)
+ {
+-	struct nouveau_cli *cli;
++	struct nouveau_cli *cli = *pcli = kzalloc(size, GFP_KERNEL);
+ 	int ret;
+-
+-	*pcli = NULL;
+-	ret = nouveau_client_create_(sname, name, nouveau_config,
+-				     nouveau_debug, size, pcli);
+-	cli = *pcli;
+-	if (ret) {
+-		if (cli)
+-			nouveau_client_destroy(&cli->base);
+-		*pcli = NULL;
++	if (cli) {
++		snprintf(cli->name, sizeof(cli->name), "%s", sname);
++		cli->dev = dev;
++
++		ret = nvif_client_init(NULL, cli->name, nouveau_name(dev),
++				       nouveau_config, nouveau_debug,
++				       &cli->base);
++		if (ret == 0) {
++			mutex_init(&cli->mutex);
++			usif_client_init(cli);
++		}
+ 		return ret;
+ 	}
+-
+-	mutex_init(&cli->mutex);
+-	return 0;
++	return -ENOMEM;
+ }
+ 
+ static void
+ nouveau_cli_destroy(struct nouveau_cli *cli)
+ {
+-	struct nouveau_object *client = nv_object(cli);
+-	nouveau_vm_ref(NULL, &cli->base.vm, NULL);
+-	nouveau_client_fini(&cli->base, false);
+-	atomic_set(&client->refcount, 1);
+-	nouveau_object_ref(NULL, &client);
++	nvkm_vm_ref(NULL, &nvxx_client(&cli->base)->vm, NULL);
++	nvif_client_fini(&cli->base);
++	usif_client_fini(cli);
++	kfree(cli);
+ }
+ 
+ static void
+ nouveau_accel_fini(struct nouveau_drm *drm)
+ {
+-	nouveau_gpuobj_ref(NULL, &drm->notify);
++	nouveau_channel_idle(drm->channel);
++	nvif_object_fini(&drm->ntfy);
++	nvkm_gpuobj_del(&drm->notify);
++	nvif_notify_fini(&drm->flip);
++	nvif_object_fini(&drm->nvsw);
+ 	nouveau_channel_del(&drm->channel);
++
++	nouveau_channel_idle(drm->cechan);
++	nvif_object_fini(&drm->ttm.copy);
+ 	nouveau_channel_del(&drm->cechan);
++
+ 	if (drm->fence)
+ 		nouveau_fence(drm)->dtor(drm);
+ }
+@@ -483,28 +493,36 @@ nouveau_drm_unload(struct drm_device *de
+ 	nouveau_bios_takedown(dev);
+ 
+ 	nouveau_ttm_fini(drm);
+-	nouveau_agp_fini(drm);
+ 	nouveau_vga_fini(drm);
+ 
++	nvif_device_fini(&drm->device);
+ 	if (drm->hdmi_device)
+ 		pci_dev_put(drm->hdmi_device);
+ 	nouveau_cli_destroy(&drm->client);
+ 	return 0;
+ }
+ 
+-static void
+-nouveau_drm_remove(struct pci_dev *pdev)
++void
++nouveau_drm_device_remove(struct drm_device *dev)
+ {
+-	struct drm_device *dev = pci_get_drvdata(pdev);
+ 	struct nouveau_drm *drm = nouveau_drm(dev);
+-	struct nouveau_object *device;
++	struct nvkm_client *client;
++	struct nvkm_device *device;
+ 
+ 	dev->irq_enabled = false;
+-	device = drm->client.base.device;
++	client = nvxx_client(&drm->client.base);
++	device = nvkm_device_find(client->device);
+ 	drm_put_dev(dev);
+ 
+-	nouveau_object_ref(NULL, &device);
+-	nouveau_object_debug();
++	nvkm_device_del(&device);
++}
++
++static void
++nouveau_drm_remove(struct pci_dev *pdev)
++{
++	struct drm_device *dev = pci_get_drvdata(pdev);
++
++	nouveau_drm_device_remove(dev);
+ }
+ 
+ static int
+@@ -571,67 +590,64 @@ fail_client:
+ fail_display:
+ 	if (dev->mode_config.num_crtc) {
+ 		NV_INFO(drm, "resuming display...\n");
+-		nouveau_display_resume(dev);
++		nouveau_display_resume(dev, runtime);
+ 	}
+ 	return ret;
+ }
+ 
+-int nouveau_pmops_suspend(struct device *dev)
+-{
+-	struct pci_dev *pdev = to_pci_dev(dev);
+-	struct drm_device *drm_dev = pci_get_drvdata(pdev);
+-	int ret;
+-
+-	if (drm_dev->switch_power_state == DRM_SWITCH_POWER_OFF ||
+-	    drm_dev->switch_power_state == DRM_SWITCH_POWER_DYNAMIC_OFF)
+-		return 0;
+-
+-	if (drm_dev->mode_config.num_crtc)
+-		nouveau_fbcon_set_suspend(drm_dev, 1);
+-
+-	ret = nouveau_do_suspend(drm_dev, false);
+-	if (ret)
+-		return ret;
+-
+-	pci_save_state(pdev);
+-	pci_disable_device(pdev);
+-	pci_set_power_state(pdev, PCI_D3hot);
+-	return 0;
+-}
+-
+ static int
+-nouveau_do_resume(struct drm_device *dev)
++nouveau_do_resume(struct drm_device *dev, bool runtime)
+ {
+ 	struct nouveau_drm *drm = nouveau_drm(dev);
+ 	struct nouveau_cli *cli;
+ 
+-	NV_INFO(drm, "re-enabling device...\n");
+-
+-	nouveau_agp_reset(drm);
+-
+ 	NV_INFO(drm, "resuming kernel object tree...\n");
+-	nouveau_client_init(&drm->client.base);
+-	nouveau_agp_init(drm);
++	nvif_client_resume(&drm->client.base);
+ 
+ 	NV_INFO(drm, "resuming client object trees...\n");
+ 	if (drm->fence && nouveau_fence(drm)->resume)
+ 		nouveau_fence(drm)->resume(drm);
+ 
+ 	list_for_each_entry(cli, &drm->clients, head) {
+-		nouveau_client_init(&cli->base);
++		nvif_client_resume(&cli->base);
+ 	}
+ 
+ 	nouveau_run_vbios_init(dev);
+ 
+ 	if (dev->mode_config.num_crtc) {
+ 		NV_INFO(drm, "resuming display...\n");
+-		nouveau_display_repin(dev);
++		nouveau_display_resume(dev, runtime);
++		NV_INFO(drm, "resuming console...\n");
++		nouveau_fbcon_set_suspend(dev, 0);
+ 	}
+ 
+ 	return 0;
+ }
+ 
+-int nouveau_pmops_resume(struct device *dev)
++int
++nouveau_pmops_suspend(struct device *dev)
++{
++	struct pci_dev *pdev = to_pci_dev(dev);
++	struct drm_device *drm_dev = pci_get_drvdata(pdev);
++	int ret;
++
++	if (drm_dev->switch_power_state == DRM_SWITCH_POWER_OFF ||
++	    drm_dev->switch_power_state == DRM_SWITCH_POWER_DYNAMIC_OFF)
++		return 0;
++
++	ret = nouveau_do_suspend(drm_dev, false);
++	if (ret)
++		return ret;
++
++	pci_save_state(pdev);
++	pci_disable_device(pdev);
++	pci_set_power_state(pdev, PCI_D3hot);
++	udelay(200);
++	return 0;
++}
++
++int
++nouveau_pmops_resume(struct device *dev)
+ {
+ 	struct pci_dev *pdev = to_pci_dev(dev);
+ 	struct drm_device *drm_dev = pci_get_drvdata(pdev);
+@@ -648,48 +664,123 @@ int nouveau_pmops_resume(struct device *
+ 		return ret;
+ 	pci_set_master(pdev);
+ 
+-	ret = nouveau_do_resume(drm_dev);
+-	if (ret)
+-		return ret;
+-	if (drm_dev->mode_config.num_crtc)
+-		nouveau_fbcon_set_suspend(drm_dev, 0);
++	return nouveau_do_resume(drm_dev, false);
++}
+ 
+-	nouveau_fbcon_zfill_all(drm_dev);
+-	if (drm_dev->mode_config.num_crtc)
+-		nouveau_display_resume(drm_dev);
+-	return 0;
++static int
++nouveau_pmops_freeze(struct device *dev)
++{
++	struct pci_dev *pdev = to_pci_dev(dev);
++	struct drm_device *drm_dev = pci_get_drvdata(pdev);
++	return nouveau_do_suspend(drm_dev, false);
+ }
+ 
+-static int nouveau_pmops_freeze(struct device *dev)
++static int
++nouveau_pmops_thaw(struct device *dev)
++{
++	struct pci_dev *pdev = to_pci_dev(dev);
++	struct drm_device *drm_dev = pci_get_drvdata(pdev);
++	return nouveau_do_resume(drm_dev, false);
++}
++
++static int
++nouveau_pmops_runtime_suspend(struct device *dev)
+ {
+ 	struct pci_dev *pdev = to_pci_dev(dev);
+ 	struct drm_device *drm_dev = pci_get_drvdata(pdev);
+ 	int ret;
+ 
+-	if (drm_dev->mode_config.num_crtc)
+-		nouveau_fbcon_set_suspend(drm_dev, 1);
++	if (nouveau_runtime_pm == 0) {
++		pm_runtime_forbid(dev);
++		return -EBUSY;
++	}
+ 
+-	ret = nouveau_do_suspend(drm_dev, false);
++	/* are we optimus enabled? */
++	if (nouveau_runtime_pm == -1 && !nouveau_is_optimus() && !nouveau_is_v1_dsm()) {
++		DRM_DEBUG_DRIVER("failing to power off - not optimus\n");
++		pm_runtime_forbid(dev);
++		return -EBUSY;
++	}
++
++	drm_kms_helper_poll_disable(drm_dev);
++	vga_switcheroo_set_dynamic_switch(pdev, VGA_SWITCHEROO_OFF);
++	nouveau_switcheroo_optimus_dsm();
++	ret = nouveau_do_suspend(drm_dev, true);
++	pci_save_state(pdev);
++	pci_disable_device(pdev);
++	pci_ignore_hotplug(pdev);
++	pci_set_power_state(pdev, PCI_D3cold);
++	drm_dev->switch_power_state = DRM_SWITCH_POWER_DYNAMIC_OFF;
+ 	return ret;
+ }
+ 
+-static int nouveau_pmops_thaw(struct device *dev)
++static int
++nouveau_pmops_runtime_resume(struct device *dev)
+ {
+ 	struct pci_dev *pdev = to_pci_dev(dev);
+ 	struct drm_device *drm_dev = pci_get_drvdata(pdev);
++	struct nvif_device *device = &nouveau_drm(drm_dev)->device;
+ 	int ret;
+ 
+-	ret = nouveau_do_resume(drm_dev);
++	if (nouveau_runtime_pm == 0)
++		return -EINVAL;
++
++	pci_set_power_state(pdev, PCI_D0);
++	pci_restore_state(pdev);
++	ret = pci_enable_device(pdev);
+ 	if (ret)
+ 		return ret;
+-	if (drm_dev->mode_config.num_crtc)
+-		nouveau_fbcon_set_suspend(drm_dev, 0);
+-	nouveau_fbcon_zfill_all(drm_dev);
+-	if (drm_dev->mode_config.num_crtc)
+-		nouveau_display_resume(drm_dev);
+-	return 0;
++	pci_set_master(pdev);
++
++	ret = nouveau_do_resume(drm_dev, true);
++	drm_kms_helper_poll_enable(drm_dev);
++	/* do magic */
++	nvif_mask(&device->object, 0x088488, (1 << 25), (1 << 25));
++	vga_switcheroo_set_dynamic_switch(pdev, VGA_SWITCHEROO_ON);
++	drm_dev->switch_power_state = DRM_SWITCH_POWER_ON;
++	return ret;
+ }
+ 
++static int
++nouveau_pmops_runtime_idle(struct device *dev)
++{
++	struct pci_dev *pdev = to_pci_dev(dev);
++	struct drm_device *drm_dev = pci_get_drvdata(pdev);
++	struct nouveau_drm *drm = nouveau_drm(drm_dev);
++	struct drm_crtc *crtc;
++
++	if (nouveau_runtime_pm == 0) {
++		pm_runtime_forbid(dev);
++		return -EBUSY;
++	}
++
++	/* are we optimus enabled? */
++	if (nouveau_runtime_pm == -1 && !nouveau_is_optimus() && !nouveau_is_v1_dsm()) {
++		DRM_DEBUG_DRIVER("failing to power off - not optimus\n");
++		pm_runtime_forbid(dev);
++		return -EBUSY;
++	}
++
++	/* if we have a hdmi audio device - make sure it has a driver loaded */
++	if (drm->hdmi_device) {
++		if (!drm->hdmi_device->driver) {
++			DRM_DEBUG_DRIVER("failing to power off - no HDMI audio driver loaded\n");
++			pm_runtime_mark_last_busy(dev);
++			return -EBUSY;
++		}
++	}
++
++	list_for_each_entry(crtc, &drm->dev->mode_config.crtc_list, head) {
++		if (crtc->enabled) {
++			DRM_DEBUG_DRIVER("failing to power off - crtc active\n");
++			return -EBUSY;
++		}
++	}
++	pm_runtime_mark_last_busy(dev);
++	pm_runtime_autosuspend(dev);
++	/* we don't want the main rpm_idle to call suspend - we want to autosuspend */
++	return 1;
++}
+ 
+ static int
+ nouveau_drm_open(struct drm_device *dev, struct drm_file *fpriv)
+@@ -768,38 +864,45 @@ nouveau_drm_postclose(struct drm_device 
+ 
+ static const struct drm_ioctl_desc
+ nouveau_ioctls[] = {
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_GETPARAM, nouveau_abi16_ioctl_getparam, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_SETPARAM, nouveau_abi16_ioctl_setparam, DRM_UNLOCKED|DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_CHANNEL_ALLOC, nouveau_abi16_ioctl_channel_alloc, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_CHANNEL_FREE, nouveau_abi16_ioctl_channel_free, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_GROBJ_ALLOC, nouveau_abi16_ioctl_grobj_alloc, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_NOTIFIEROBJ_ALLOC, nouveau_abi16_ioctl_notifierobj_alloc, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_GPUOBJ_FREE, nouveau_abi16_ioctl_gpuobj_free, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_NEW, nouveau_gem_ioctl_new, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_PUSHBUF, nouveau_gem_ioctl_pushbuf, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_CPU_PREP, nouveau_gem_ioctl_cpu_prep, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_CPU_FINI, nouveau_gem_ioctl_cpu_fini, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+-	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_INFO, nouveau_gem_ioctl_info, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_GETPARAM, nouveau_abi16_ioctl_getparam, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_SETPARAM, nouveau_abi16_ioctl_setparam, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_CHANNEL_ALLOC, nouveau_abi16_ioctl_channel_alloc, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_CHANNEL_FREE, nouveau_abi16_ioctl_channel_free, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_GROBJ_ALLOC, nouveau_abi16_ioctl_grobj_alloc, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_NOTIFIEROBJ_ALLOC, nouveau_abi16_ioctl_notifierobj_alloc, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_GPUOBJ_FREE, nouveau_abi16_ioctl_gpuobj_free, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_NEW, nouveau_gem_ioctl_new, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_PUSHBUF, nouveau_gem_ioctl_pushbuf, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_CPU_PREP, nouveau_gem_ioctl_cpu_prep, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_CPU_FINI, nouveau_gem_ioctl_cpu_fini, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_INFO, nouveau_gem_ioctl_info, DRM_AUTH|DRM_RENDER_ALLOW),
+ };
+ 
+-long nouveau_drm_ioctl(struct file *filp,
+-		       unsigned int cmd, unsigned long arg)
++long
++nouveau_drm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ {
+-	struct drm_file *file_priv = filp->private_data;
+-	struct drm_device *dev;
++	struct drm_file *filp = file->private_data;
++	struct drm_device *dev = filp->minor->dev;
+ 	long ret;
+-	dev = file_priv->minor->dev;
+ 
+ 	ret = pm_runtime_get_sync(dev->dev);
+ 	if (ret < 0 && ret != -EACCES)
+ 		return ret;
+ 
+-	ret = drm_ioctl(filp, cmd, arg);
++	switch (_IOC_NR(cmd) - DRM_COMMAND_BASE) {
++	case DRM_NOUVEAU_NVIF:
++		ret = usif_ioctl(filp, (void __user *)arg, _IOC_SIZE(cmd));
++		break;
++	default:
++		ret = drm_ioctl(file, cmd, arg);
++		break;
++	}
+ 
+ 	pm_runtime_mark_last_busy(dev->dev);
+ 	pm_runtime_put_autosuspend(dev->dev);
+ 	return ret;
+ }
++
+ static const struct file_operations
+ nouveau_driver_fops = {
+ 	.owner = THIS_MODULE,
+@@ -890,101 +994,21 @@ nouveau_drm_pci_table[] = {
+ 	{}
+ };
+ 
+-static int nouveau_pmops_runtime_suspend(struct device *dev)
+-{
+-	struct pci_dev *pdev = to_pci_dev(dev);
+-	struct drm_device *drm_dev = pci_get_drvdata(pdev);
+-	int ret;
+-
+-	if (nouveau_runtime_pm == 0) {
+-		pm_runtime_forbid(dev);
+-		return -EBUSY;
+-	}
+-
+-	/* are we optimus enabled? */
+-	if (nouveau_runtime_pm == -1 && !nouveau_is_optimus() && !nouveau_is_v1_dsm()) {
+-		DRM_DEBUG_DRIVER("failing to power off - not optimus\n");
+-		pm_runtime_forbid(dev);
+-		return -EBUSY;
+-	}
+-
+-	nv_debug_level(SILENT);
+-	drm_kms_helper_poll_disable(drm_dev);
+-	vga_switcheroo_set_dynamic_switch(pdev, VGA_SWITCHEROO_OFF);
+-	nouveau_switcheroo_optimus_dsm();
+-	ret = nouveau_do_suspend(drm_dev, true);
+-	pci_save_state(pdev);
+-	pci_disable_device(pdev);
+-	pci_set_power_state(pdev, PCI_D3cold);
+-	drm_dev->switch_power_state = DRM_SWITCH_POWER_DYNAMIC_OFF;
+-	return ret;
+-}
+-
+-static int nouveau_pmops_runtime_resume(struct device *dev)
+-{
+-	struct pci_dev *pdev = to_pci_dev(dev);
+-	struct drm_device *drm_dev = pci_get_drvdata(pdev);
+-	struct nouveau_device *device = nouveau_dev(drm_dev);
+-	int ret;
+-
+-	if (nouveau_runtime_pm == 0)
+-		return -EINVAL;
+-
+-	pci_set_power_state(pdev, PCI_D0);
+-	pci_restore_state(pdev);
+-	ret = pci_enable_device(pdev);
+-	if (ret)
+-		return ret;
+-	pci_set_master(pdev);
+-
+-	ret = nouveau_do_resume(drm_dev);
+-	drm_kms_helper_poll_enable(drm_dev);
+-	/* do magic */
+-	nv_mask(device, 0x88488, (1 << 25), (1 << 25));
+-	vga_switcheroo_set_dynamic_switch(pdev, VGA_SWITCHEROO_ON);
+-	drm_dev->switch_power_state = DRM_SWITCH_POWER_ON;
+-	nv_debug_level(NORMAL);
+-	return ret;
+-}
+-
+-static int nouveau_pmops_runtime_idle(struct device *dev)
++static void nouveau_display_options(void)
+ {
+-	struct pci_dev *pdev = to_pci_dev(dev);
+-	struct drm_device *drm_dev = pci_get_drvdata(pdev);
+-	struct nouveau_drm *drm = nouveau_drm(drm_dev);
+-	struct drm_crtc *crtc;
++	DRM_DEBUG_DRIVER("Loading Nouveau with parameters:\n");
+ 
+-	if (nouveau_runtime_pm == 0) {
+-		pm_runtime_forbid(dev);
+-		return -EBUSY;
+-	}
+-
+-	/* are we optimus enabled? */
+-	if (nouveau_runtime_pm == -1 && !nouveau_is_optimus() && !nouveau_is_v1_dsm()) {
+-		DRM_DEBUG_DRIVER("failing to power off - not optimus\n");
+-		pm_runtime_forbid(dev);
+-		return -EBUSY;
+-	}
+-
+-	/* if we have a hdmi audio device - make sure it has a driver loaded */
+-	if (drm->hdmi_device) {
+-		if (!drm->hdmi_device->driver) {
+-			DRM_DEBUG_DRIVER("failing to power off - no HDMI audio driver loaded\n");
+-			pm_runtime_mark_last_busy(dev);
+-			return -EBUSY;
+-		}
+-	}
+-
+-	list_for_each_entry(crtc, &drm->dev->mode_config.crtc_list, head) {
+-		if (crtc->enabled) {
+-			DRM_DEBUG_DRIVER("failing to power off - crtc active\n");
+-			return -EBUSY;
+-		}
+-	}
+-	pm_runtime_mark_last_busy(dev);
+-	pm_runtime_autosuspend(dev);
+-	/* we don't want the main rpm_idle to call suspend - we want to autosuspend */
+-	return 1;
++	DRM_DEBUG_DRIVER("... tv_disable   : %d\n", nouveau_tv_disable);
++	DRM_DEBUG_DRIVER("... ignorelid    : %d\n", nouveau_ignorelid);
++	DRM_DEBUG_DRIVER("... duallink     : %d\n", nouveau_duallink);
++	DRM_DEBUG_DRIVER("... nofbaccel    : %d\n", nouveau_nofbaccel);
++	DRM_DEBUG_DRIVER("... config       : %s\n", nouveau_config);
++	DRM_DEBUG_DRIVER("... debug        : %s\n", nouveau_debug);
++	DRM_DEBUG_DRIVER("... noaccel      : %d\n", nouveau_noaccel);
++	DRM_DEBUG_DRIVER("... modeset      : %d\n", nouveau_modeset);
++	DRM_DEBUG_DRIVER("... runpm        : %d\n", nouveau_runtime_pm);
++	DRM_DEBUG_DRIVER("... vram_pushbuf : %d\n", nouveau_vram_pushbuf);
++	DRM_DEBUG_DRIVER("... pstate       : %d\n", nouveau_pstate);
+ }
+ 
+ static const struct dev_pm_ops nouveau_pm_ops = {

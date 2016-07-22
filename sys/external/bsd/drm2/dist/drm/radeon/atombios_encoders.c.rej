@@ -1,0 +1,10 @@
+--- radeon/atombios_encoders.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/atombios_encoders.c	2016-07-12 01:31:24.000000000 +0900
+@@ -27,6 +27,7 @@
+ #include <drm/drm_crtc_helper.h>
+ #include <drm/radeon_drm.h>
+ #include "radeon.h"
++#include "radeon_audio.h"
+ #include "atom.h"
+ #include <linux/backlight.h>
+ 

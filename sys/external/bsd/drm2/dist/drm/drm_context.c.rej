@@ -1,0 +1,24 @@
+--- drm_context.c	2016-07-22 15:48:07.000000000 +0900
++++ drm_context.c	2016-07-12 01:31:24.000000000 +0900
+@@ -28,14 +23,14 @@
+  * OTHER DEALINGS IN THE SOFTWARE.
+  */
+ 
+-/*
+- * ChangeLog:
+- *  2001-11-16	Torsten Duwe <duwe@caldera.de>
+- *		added context constructor/destructor hooks,
+- *		needed by SiS driver's memory management.
+- */
+-
+ #include <drm/drmP.h>
++#include "drm_legacy.h"
++
++struct drm_ctx_list {
++	struct list_head head;
++	drm_context_t handle;
++	struct drm_file *tag;
++};
+ 
+ /******************************************************************/
+ /** \name Context bitmap support */

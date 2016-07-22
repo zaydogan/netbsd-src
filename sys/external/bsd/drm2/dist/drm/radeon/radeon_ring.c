@@ -296,27 +296,6 @@ int radeon_ib_ring_tests(struct radeon_device *rdev)
 static int radeon_debugfs_ring_init(struct radeon_device *rdev, struct radeon_ring *ring);
 
 /**
- * radeon_ring_write - write a value to the ring
- *
- * @ring: radeon_ring structure holding ring information
- * @v: dword (dw) value to write
- *
- * Write a value to the requested ring buffer (all asics).
- */
-void radeon_ring_write(struct radeon_ring *ring, uint32_t v)
-{
-#if DRM_DEBUG_CODE
-	if (ring->count_dw <= 0) {
-		DRM_ERROR("radeon: writing more dwords to the ring than expected!\n");
-	}
-#endif
-	ring->ring[ring->wptr++] = v;
-	ring->wptr &= ring->ptr_mask;
-	ring->count_dw--;
-	ring->ring_free_dw--;
-}
-
-/**
  * radeon_ring_supports_scratch_reg - check if the ring supports
  * writing to scratch registers
  *
@@ -428,17 +407,29 @@ int radeon_ring_lock(struct radeon_device *rdev, struct radeon_ring *ring, unsig
  *
  * @rdev: radeon_device pointer
  * @ring: radeon_ring structure holding ring information
+ * @hdp_flush: Whether or not to perform an HDP cache flush
  *
  * Update the wptr (write pointer) to tell the GPU to
  * execute new commands on the ring buffer (all asics).
  */
-void radeon_ring_commit(struct radeon_device *rdev, struct radeon_ring *ring)
+void radeon_ring_commit(struct radeon_device *rdev, struct radeon_ring *ring,
+			bool hdp_flush)
 {
+	/* If we are emitting the HDP flush via the ring buffer, we need to
+	 * do it before padding.
+	 */
+	if (hdp_flush && rdev->asic->ring[ring->idx]->hdp_flush)
+		rdev->asic->ring[ring->idx]->hdp_flush(rdev, ring);
 	/* We pad to match fetch size */
 	while (ring->wptr & ring->align_mask) {
 		radeon_ring_write(ring, ring->nop);
 	}
 	mb();
+	/* If we are emitting the HDP flush via MMIO, we need to do it after
+	 * all CPU writes to VRAM finished.
+	 */
+	if (hdp_flush && rdev->asic->mmio_hdp_flush)
+		rdev->asic->mmio_hdp_flush(rdev);
 	radeon_ring_set_wptr(rdev, ring);
 }
 
@@ -448,12 +439,14 @@ void radeon_ring_commit(struct radeon_device *rdev, struct radeon_ring *ring)
  *
  * @rdev: radeon_device pointer
  * @ring: radeon_ring structure holding ring information
+ * @hdp_flush: Whether or not to perform an HDP cache flush
  *
  * Call radeon_ring_commit() then unlock the ring (all asics).
  */
-void radeon_ring_unlock_commit(struct radeon_device *rdev, struct radeon_ring *ring)
+void radeon_ring_unlock_commit(struct radeon_device *rdev, struct radeon_ring *ring,
+			       bool hdp_flush)
 {
-	radeon_ring_commit(rdev, ring);
+	radeon_ring_commit(rdev, ring, hdp_flush);
 	mutex_unlock(&rdev->ring_lock);
 }
 
@@ -572,7 +565,7 @@ unsigned radeon_ring_backup(struct radeon_device *rdev, struct radeon_ring *ring
 	}
 
 	/* and then save the content of the ring */
-	*data = kmalloc_array(size, sizeof(uint32_t), GFP_KERNEL);
+	*data = drm_malloc_ab(size, sizeof(uint32_t));
 	if (!*data) {
 		mutex_unlock(&rdev->ring_lock);
 		return 0;
@@ -613,8 +606,8 @@ int radeon_ring_restore(struct radeon_device *rdev, struct radeon_ring *ring,
 		radeon_ring_write(ring, data[i]);
 	}
 
-	radeon_ring_unlock_commit(rdev, ring);
-	kfree(data);
+	radeon_ring_unlock_commit(rdev, ring, false);
+	drm_free_large(data);
 	return 0;
 }
 
@@ -641,7 +634,7 @@ int radeon_ring_init(struct radeon_device *rdev, struct radeon_ring *ring, unsig
 	/* Allocate ring buffer */
 	if (ring->ring_obj == NULL) {
 		r = radeon_bo_create(rdev, ring->ring_size, PAGE_SIZE, true,
-				     RADEON_GEM_DOMAIN_GTT,
+				     RADEON_GEM_DOMAIN_GTT, 0, NULL,
 				     NULL, &ring->ring_obj);
 		if (r) {
 			dev_err(rdev->dev, "(%d) ring create failed\n", r);
@@ -753,7 +746,7 @@ static int radeon_debugfs_ring_info(struct seq_file *m, void *data)
 	seq_printf(m, "%u free dwords in ring\n", ring->ring_free_dw);
 	seq_printf(m, "%u dwords in ring\n", count);
 
-	if (!ring->ready)
+	if (!ring->ring)
 		return 0;
 
 	/* print 8 dw before current rptr as often it's the last executed
@@ -792,22 +785,6 @@ static struct drm_info_list radeon_debugfs_ring_info_list[] = {
 	{"radeon_ring_vce2", radeon_debugfs_ring_info, 0, &si_vce2_index},
 };
 
-static int radeon_debugfs_sa_info(struct seq_file *m, void *data)
-{
-	struct drm_info_node *node = (struct drm_info_node *) m->private;
-	struct drm_device *dev = node->minor->dev;
-	struct radeon_device *rdev = dev->dev_private;
-
-	radeon_sa_bo_dump_debug_info(&rdev->ring_tmp_bo, m);
-
-	return 0;
-
-}
-
-static struct drm_info_list radeon_debugfs_sa_list[] = {
-        {"radeon_sa_info", &radeon_debugfs_sa_info, 0, NULL},
-};
-
 #endif
 
 static int radeon_debugfs_ring_init(struct radeon_device *rdev, struct radeon_ring *ring)
@@ -828,13 +805,4 @@ static int radeon_debugfs_ring_init(struct radeon_device *rdev, struct radeon_ri
 	}
 #endif
 	return 0;
-}
-
-static int radeon_debugfs_sa_init(struct radeon_device *rdev)
-{
-#if defined(CONFIG_DEBUG_FS)
-	return radeon_debugfs_add_files(rdev, radeon_debugfs_sa_list, 1);
-#else
-	return 0;
-#endif
 }

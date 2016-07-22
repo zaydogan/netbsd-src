@@ -35,14 +35,8 @@ __KERNEL_RCSID(0, "$NetBSD: nouveau_dp.c,v 1.2 2016/01/29 22:25:45 riastradh Exp
 #include "nouveau_encoder.h"
 #include "nouveau_crtc.h"
 
-#include <core/class.h>
-
-#include <subdev/gpio.h>
-#include <subdev/i2c.h>
-
 static void
-nouveau_dp_probe_oui(struct drm_device *dev, struct nouveau_i2c_port *auxch,
-		     u8 *dpcd)
+nouveau_dp_probe_oui(struct drm_device *dev, struct nvkm_i2c_aux *aux, u8 *dpcd)
 {
 	struct nouveau_drm *drm = nouveau_drm(dev);
 	u8 buf[3];
@@ -95,7 +89,6 @@ nouveau_dp_detect(struct drm_encoder *encoder)
 	NV_DEBUG(drm, "maximum: %dx%d\n",
 		     nv_encoder->dp.link_nr, nv_encoder->dp.link_bw);
 
-	nouveau_dp_probe_oui(dev, auxch, dpcd);
-
-	return true;
+	nouveau_dp_probe_oui(dev, aux, dpcd);
+	return 0;
 }

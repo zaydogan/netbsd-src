@@ -1,0 +1,130 @@
+--- radeon/radeon_device.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/radeon_device.c	2016-07-12 01:31:24.000000000 +0900
+@@ -985,6 +1068,7 @@ int radeon_atombios_init(struct radeon_d
+ 	}
+ 
+ 	mutex_init(&rdev->mode_info.atom_context->mutex);
++	mutex_init(&rdev->mode_info.atom_context->scratch_mutex);
+ 	radeon_atom_initialize_bios_scratch_regs(rdev->ddev);
+ 	atom_allocate_fb_scratch(rdev->mode_info.atom_context);
+ 	return 0;
+@@ -1141,32 +1231,62 @@ static void radeon_check_arguments(struc
+ 		radeon_agpmode = 0;
+ 		break;
+ 	}
+-}
+ 
+-/**
+- * radeon_switcheroo_quirk_long_wakeup - return true if longer d3 delay is
+- * needed for waking up.
+- *
+- * @pdev: pci dev pointer
+- */
+-static bool radeon_switcheroo_quirk_long_wakeup(struct pci_dev *pdev)
+-{
++	if (!radeon_check_pot_argument(radeon_vm_size)) {
++		dev_warn(rdev->dev, "VM size (%d) must be a power of 2\n",
++			 radeon_vm_size);
++		radeon_vm_size = 4;
++	}
++
++	if (radeon_vm_size < 1) {
++		dev_warn(rdev->dev, "VM size (%d) to small, min is 1GB\n",
++			 radeon_vm_size);
++		radeon_vm_size = 4;
++	}
++
++       /*
++        * Max GPUVM size for Cayman, SI and CI are 40 bits.
++        */
++	if (radeon_vm_size > 1024) {
++		dev_warn(rdev->dev, "VM size (%d) too large, max is 1TB\n",
++			 radeon_vm_size);
++		radeon_vm_size = 4;
++	}
++
++	/* defines number of bits in page table versus page directory,
++	 * a page is 4KB so we have 12 bits offset, minimum 9 bits in the
++	 * page table and the remaining bits are in the page directory */
++	if (radeon_vm_block_size == -1) {
++
++		/* Total bits covered by PD + PTs */
++		unsigned bits = ilog2(radeon_vm_size) + 18;
++
++		/* Make sure the PD is 4K in size up to 8GB address space.
++		   Above that split equal between PD and PTs */
++		if (radeon_vm_size <= 8)
++			radeon_vm_block_size = bits - 9;
++		else
++			radeon_vm_block_size = (bits + 3) / 2;
+ 
+-	/* 6600m in a macbook pro */
+-	if (pdev->subsystem_vendor == PCI_VENDOR_ID_APPLE &&
+-	    pdev->subsystem_device == 0x00e2) {
+-		printk(KERN_INFO "radeon: quirking longer d3 wakeup delay\n");
+-		return true;
++	} else if (radeon_vm_block_size < 9) {
++		dev_warn(rdev->dev, "VM page table size (%d) too small\n",
++			 radeon_vm_block_size);
++		radeon_vm_block_size = 9;
+ 	}
+ 
+-	return false;
++	if (radeon_vm_block_size > 24 ||
++	    (radeon_vm_size * 1024) < (1ull << radeon_vm_block_size)) {
++		dev_warn(rdev->dev, "VM page table size (%d) too large\n",
++			 radeon_vm_block_size);
++		radeon_vm_block_size = 9;
++	}
+ }
+ 
+ /**
+  * radeon_switcheroo_set_state - set switcheroo state
+  *
+  * @pdev: pci dev pointer
+- * @state: vga switcheroo state
++ * @state: vga_switcheroo state
+  *
+  * Callback for the switcheroo driver.  Suspends or resumes the
+  * the asics before or after it is powered up using ACPI methods.
+@@ -1281,24 +1404,26 @@ int radeon_device_init(struct radeon_dev
+ 	mutex_init(&rdev->pm.mutex);
+ 	mutex_init(&rdev->gpu_clock_mutex);
+ 	mutex_init(&rdev->srbm_mutex);
++	mutex_init(&rdev->grbm_idx_mutex);
+ 	init_rwsem(&rdev->pm.mclk_lock);
+ 	init_rwsem(&rdev->exclusive_lock);
+ 	init_waitqueue_head(&rdev->irq.vblank_queue);
++	mutex_init(&rdev->mn_lock);
++	hash_init(rdev->mn_hash);
+ 	r = radeon_gem_init(rdev);
+ 	if (r)
+ 		return r;
+ 
++	radeon_check_arguments(rdev);
+ 	/* Adjust VM size here.
+-	 * Currently set to 4GB ((1 << 20) 4k pages).
+-	 * Max GPUVM size for cayman and SI is 40 bits.
++	 * Max GPUVM size for cayman+ is 40 bits.
+ 	 */
+-	rdev->vm_manager.max_pfn = 1 << 20;
++	rdev->vm_manager.max_pfn = radeon_vm_size << 18;
+ 
+ 	/* Set asic functions */
+ 	r = radeon_asic_init(rdev);
+ 	if (r)
+ 		return r;
+-	radeon_check_arguments(rdev);
+ 
+ 	/* all of the newer IGP chips have an internal gart
+ 	 * However some rs4xx report as AGP, so remove that here.
+@@ -1392,6 +1517,9 @@ int radeon_device_init(struct radeon_dev
+ 	if (rdev->rio_mem == NULL)
+ 		DRM_ERROR("Unable to find PCI I/O BAR\n");
+ 
++	if (rdev->flags & RADEON_IS_PX)
++		radeon_device_handle_px_quirks(rdev);
++
+ 	/* if we have > 1 VGA cards, then disable the radeon VGA resources */
+ 	/* this will fail for cards that aren't VGA class devices, just
+ 	 * ignore it */

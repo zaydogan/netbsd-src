@@ -1,0 +1,25 @@
+--- nouveau/nouveau_bo.h	2016-07-22 15:48:08.000000000 +0900
++++ nouveau/nouveau_bo.h	2016-07-12 01:31:24.000000000 +0900
+@@ -1,16 +1,19 @@
+ #ifndef __NOUVEAU_BO_H__
+ #define __NOUVEAU_BO_H__
+ 
++#include <drm/drm_gem.h>
++
+ struct nouveau_channel;
+ struct nouveau_fence;
+-struct nouveau_vma;
++struct nvkm_vma;
+ 
+ struct nouveau_bo {
+ 	struct ttm_buffer_object bo;
+ 	struct ttm_placement placement;
+ 	u32 valid_domains;
+-	u32 placements[3];
+-	u32 busy_placements[3];
++	struct ttm_place placements[3];
++	struct ttm_place busy_placements[3];
++	bool force_coherent;
+ 	struct ttm_bo_kmap_obj kmap;
+ 	struct list_head head;
+ 

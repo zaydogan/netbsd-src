@@ -1,0 +1,93 @@
+--- nouveau/nouveau_abi16.c	2016-07-22 15:48:08.000000000 +0900
++++ nouveau/nouveau_abi16.c	2016-07-12 01:31:24.000000000 +0900
+@@ -223,10 +224,10 @@ nouveau_abi16_ioctl_getparam(ABI16_IOCTL
+ 		getparam->value = 1;
+ 		break;
+ 	case NOUVEAU_GETPARAM_GRAPH_UNITS:
+-		getparam->value = graph->units ? graph->units(graph) : 0;
++		getparam->value = nvkm_gr_units(gr);
+ 		break;
+ 	default:
+-		nv_debug(device, "unknown parameter %lld\n", getparam->param);
++		NV_PRINTK(dbg, cli, "unknown parameter %lld\n", getparam->param);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -245,12 +246,9 @@ nouveau_abi16_ioctl_channel_alloc(ABI16_
+ 	struct drm_nouveau_channel_alloc *init = data;
+ 	struct nouveau_cli *cli = nouveau_cli(file_priv);
+ 	struct nouveau_drm *drm = nouveau_drm(dev);
+-	struct nouveau_abi16 *abi16 = nouveau_abi16_get(file_priv, dev);
++	struct nouveau_abi16 *abi16 = nouveau_abi16_get(file_priv);
+ 	struct nouveau_abi16_chan *chan;
+-	struct nouveau_client *client;
+-	struct nouveau_device *device;
+-	struct nouveau_instmem *imem;
+-	struct nouveau_fb *pfb;
++	struct nvif_device *device;
+ 	int ret;
+ 
+ 	if (unlikely(!abi16))
+@@ -259,21 +257,18 @@ nouveau_abi16_ioctl_channel_alloc(ABI16_
+ 	if (!drm->channel)
+ 		return nouveau_abi16_put(abi16, -ENODEV);
+ 
+-	client = nv_client(abi16->client);
+-	device = nv_device(abi16->device);
+-	imem   = nouveau_instmem(device);
+-	pfb    = nouveau_fb(device);
++	device = &abi16->device;
+ 
+ 	/* hack to allow channel engine type specification on kepler */
+-	if (device->card_type >= NV_E0) {
++	if (device->info.family >= NV_DEVICE_INFO_V0_KEPLER) {
+ 		if (init->fb_ctxdma_handle != ~0)
+-			init->fb_ctxdma_handle = NVE0_CHANNEL_IND_ENGINE_GR;
++			init->fb_ctxdma_handle = KEPLER_CHANNEL_GPFIFO_A_V0_ENGINE_GR;
+ 		else
+ 			init->fb_ctxdma_handle = init->tt_ctxdma_handle;
+ 
+ 		/* allow flips to be executed if this is a graphics channel */
+ 		init->tt_ctxdma_handle = 0;
+-		if (init->fb_ctxdma_handle == NVE0_CHANNEL_IND_ENGINE_GR)
++		if (init->fb_ctxdma_handle == KEPLER_CHANNEL_GPFIFO_A_V0_ENGINE_GR)
+ 			init->tt_ctxdma_handle = 1;
+ 	}
+ 
+@@ -505,28 +607,23 @@ nouveau_abi16_ioctl_notifierobj_alloc(AB
+ {
+ 	struct drm_nouveau_notifierobj_alloc *info = data;
+ 	struct nouveau_drm *drm = nouveau_drm(dev);
+-	struct nouveau_device *device = nv_device(drm->device);
+-	struct nouveau_abi16 *abi16 = nouveau_abi16_get(file_priv, dev);
+-	struct nouveau_abi16_chan *chan = NULL, *temp;
++	struct nouveau_abi16 *abi16 = nouveau_abi16_get(file_priv);
++	struct nouveau_abi16_chan *chan;
+ 	struct nouveau_abi16_ntfy *ntfy;
+-	struct nouveau_object *object;
+-	struct nv_dma_class args = {};
++	struct nvif_device *device = &abi16->device;
++	struct nvif_client *client;
++	struct nv_dma_v0 args = {};
+ 	int ret;
+ 
+ 	if (unlikely(!abi16))
+ 		return -ENOMEM;
+ 
+ 	/* completely unnecessary for these chipsets... */
+-	if (unlikely(nv_device(abi16->device)->card_type >= NV_C0))
++	if (unlikely(device->info.family >= NV_DEVICE_INFO_V0_FERMI))
+ 		return nouveau_abi16_put(abi16, -EINVAL);
++	client = abi16->device.object.client;
+ 
+-	list_for_each_entry(temp, &abi16->channels, head) {
+-		if (temp->chan->handle == (NVDRM_CHAN | info->channel)) {
+-			chan = temp;
+-			break;
+-		}
+-	}
+-
++	chan = nouveau_abi16_chan(abi16, info->channel);
+ 	if (!chan)
+ 		return nouveau_abi16_put(abi16, -ENOENT);
+ 

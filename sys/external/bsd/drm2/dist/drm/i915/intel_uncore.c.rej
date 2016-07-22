@@ -1,0 +1,18 @@
+--- i915/intel_uncore.c	2016-07-22 15:48:08.000000000 +0900
++++ i915/intel_uncore.c	2016-07-12 01:31:24.000000000 +0900
+@@ -1335,13 +1759,13 @@ int i915_get_reset_stats_ioctl(struct dr
+ 	struct drm_i915_private *dev_priv = dev->dev_private;
+ 	struct drm_i915_reset_stats *args = data;
+ 	struct i915_ctx_hang_stats *hs;
+-	struct i915_hw_context *ctx;
++	struct intel_context *ctx;
+ 	int ret;
+ 
+ 	if (args->flags || args->pad)
+ 		return -EINVAL;
+ 
+-	if (args->ctx_id == DEFAULT_CONTEXT_ID && !capable(CAP_SYS_ADMIN))
++	if (args->ctx_id == DEFAULT_CONTEXT_HANDLE && !capable(CAP_SYS_ADMIN))
+ 		return -EPERM;
+ 
+ 	ret = mutex_lock_interruptible(&dev->struct_mutex);

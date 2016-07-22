@@ -1,0 +1,31 @@
+--- radeon/radeon_gem.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/radeon_gem.c	2016-07-12 01:31:24.000000000 +0900
+@@ -36,13 +36,14 @@ void radeon_gem_object_free(struct drm_g
+ 	if (robj) {
+ 		if (robj->gem_base.import_attach)
+ 			drm_prime_gem_destroy(&robj->gem_base, robj->tbo.sg);
++		radeon_mn_unregister(robj);
+ 		radeon_bo_unref(&robj);
+ 	}
+ }
+ 
+-int radeon_gem_object_create(struct radeon_device *rdev, int size,
++int radeon_gem_object_create(struct radeon_device *rdev, unsigned long size,
+ 				int alignment, int initial_domain,
+-				bool discardable, bool kernel,
++				u32 flags, bool kernel,
+ 				struct drm_gem_object **obj)
+ {
+ 	struct radeon_bo *robj;
+@@ -635,11 +810,6 @@ int radeon_gem_va_ioctl(struct drm_devic
+ 		args->operation = RADEON_VA_RESULT_ERROR;
+ 		return -EINVAL;
+ 	}
+-	if (!(args->flags & RADEON_VM_PAGE_SNOOPED)) {
+-		dev_err(&dev->pdev->dev, "only supported snooped mapping for now\n");
+-		args->operation = RADEON_VA_RESULT_ERROR;
+-		return -EINVAL;
+-	}
+ 
+ 	switch (args->operation) {
+ 	case RADEON_VA_MAP:

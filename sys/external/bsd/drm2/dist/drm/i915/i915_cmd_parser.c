@@ -28,7 +28,7 @@
 #include "i915_drv.h"
 
 /**
- * DOC: i915 batch buffer command parser
+ * DOC: batch buffer command parser
  *
  * Motivation:
  * Certain OpenGL features (e.g. transform feedback, performance monitoring)
@@ -73,7 +73,7 @@
  * those commands required by the parser. This generally works because command
  * opcode ranges have standard command length encodings. So for commands that
  * the parser does not need to check, it can easily skip them. This is
- * implementated via a per-ring length decoding vfunc.
+ * implemented via a per-ring length decoding vfunc.
  *
  * Unfortunately, there are a number of commands that do not follow the standard
  * length encoding for their opcode range, primarily amongst the MI_* commands.
@@ -85,6 +85,415 @@
  * implements a number of checks, including the privileged memory checks, via a
  * general bitmasking mechanism.
  */
+
+#define STD_MI_OPCODE_MASK  0xFF800000
+#define STD_3D_OPCODE_MASK  0xFFFF0000
+#define STD_2D_OPCODE_MASK  0xFFC00000
+#define STD_MFX_OPCODE_MASK 0xFFFF0000
+
+#define CMD(op, opm, f, lm, fl, ...)				\
+	{							\
+		.flags = (fl) | ((f) ? CMD_DESC_FIXED : 0),	\
+		.cmd = { (op), (opm) },				\
+		.length = { (lm) },				\
+		__VA_ARGS__					\
+	}
+
+/* Convenience macros to compress the tables */
+#define SMI STD_MI_OPCODE_MASK
+#define S3D STD_3D_OPCODE_MASK
+#define S2D STD_2D_OPCODE_MASK
+#define SMFX STD_MFX_OPCODE_MASK
+#define F true
+#define S CMD_DESC_SKIP
+#define R CMD_DESC_REJECT
+#define W CMD_DESC_REGISTER
+#define B CMD_DESC_BITMASK
+#define M CMD_DESC_MASTER
+
+/*            Command                          Mask   Fixed Len   Action
+	      ---------------------------------------------------------- */
+static const struct drm_i915_cmd_descriptor common_cmds[] = {
+	CMD(  MI_NOOP,                          SMI,    F,  1,      S  ),
+	CMD(  MI_USER_INTERRUPT,                SMI,    F,  1,      R  ),
+	CMD(  MI_WAIT_FOR_EVENT,                SMI,    F,  1,      M  ),
+	CMD(  MI_ARB_CHECK,                     SMI,    F,  1,      S  ),
+	CMD(  MI_REPORT_HEAD,                   SMI,    F,  1,      S  ),
+	CMD(  MI_SUSPEND_FLUSH,                 SMI,    F,  1,      S  ),
+	CMD(  MI_SEMAPHORE_MBOX,                SMI,   !F,  0xFF,   R  ),
+	CMD(  MI_STORE_DWORD_INDEX,             SMI,   !F,  0xFF,   R  ),
+	CMD(  MI_LOAD_REGISTER_IMM(1),          SMI,   !F,  0xFF,   W,
+	      .reg = { .offset = 1, .mask = 0x007FFFFC, .step = 2 }    ),
+	CMD(  MI_STORE_REGISTER_MEM,            SMI,    F,  3,     W | B,
+	      .reg = { .offset = 1, .mask = 0x007FFFFC },
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_GLOBAL_GTT,
+			.expected = 0,
+	      }},						       ),
+	CMD(  MI_LOAD_REGISTER_MEM,             SMI,    F,  3,     W | B,
+	      .reg = { .offset = 1, .mask = 0x007FFFFC },
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_GLOBAL_GTT,
+			.expected = 0,
+	      }},						       ),
+	/*
+	 * MI_BATCH_BUFFER_START requires some special handling. It's not
+	 * really a 'skip' action but it doesn't seem like it's worth adding
+	 * a new action. See i915_parse_cmds().
+	 */
+	CMD(  MI_BATCH_BUFFER_START,            SMI,   !F,  0xFF,   S  ),
+};
+
+static const struct drm_i915_cmd_descriptor render_cmds[] = {
+	CMD(  MI_FLUSH,                         SMI,    F,  1,      S  ),
+	CMD(  MI_ARB_ON_OFF,                    SMI,    F,  1,      R  ),
+	CMD(  MI_PREDICATE,                     SMI,    F,  1,      S  ),
+	CMD(  MI_TOPOLOGY_FILTER,               SMI,    F,  1,      S  ),
+	CMD(  MI_SET_APPID,                     SMI,    F,  1,      S  ),
+	CMD(  MI_DISPLAY_FLIP,                  SMI,   !F,  0xFF,   R  ),
+	CMD(  MI_SET_CONTEXT,                   SMI,   !F,  0xFF,   R  ),
+	CMD(  MI_URB_CLEAR,                     SMI,   !F,  0xFF,   S  ),
+	CMD(  MI_STORE_DWORD_IMM,               SMI,   !F,  0x3F,   B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_GLOBAL_GTT,
+			.expected = 0,
+	      }},						       ),
+	CMD(  MI_UPDATE_GTT,                    SMI,   !F,  0xFF,   R  ),
+	CMD(  MI_CLFLUSH,                       SMI,   !F,  0x3FF,  B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_GLOBAL_GTT,
+			.expected = 0,
+	      }},						       ),
+	CMD(  MI_REPORT_PERF_COUNT,             SMI,   !F,  0x3F,   B,
+	      .bits = {{
+			.offset = 1,
+			.mask = MI_REPORT_PERF_COUNT_GGTT,
+			.expected = 0,
+	      }},						       ),
+	CMD(  MI_CONDITIONAL_BATCH_BUFFER_END,  SMI,   !F,  0xFF,   B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_GLOBAL_GTT,
+			.expected = 0,
+	      }},						       ),
+	CMD(  GFX_OP_3DSTATE_VF_STATISTICS,     S3D,    F,  1,      S  ),
+	CMD(  PIPELINE_SELECT,                  S3D,    F,  1,      S  ),
+	CMD(  MEDIA_VFE_STATE,			S3D,   !F,  0xFFFF, B,
+	      .bits = {{
+			.offset = 2,
+			.mask = MEDIA_VFE_STATE_MMIO_ACCESS_MASK,
+			.expected = 0,
+	      }},						       ),
+	CMD(  GPGPU_OBJECT,                     S3D,   !F,  0xFF,   S  ),
+	CMD(  GPGPU_WALKER,                     S3D,   !F,  0xFF,   S  ),
+	CMD(  GFX_OP_3DSTATE_SO_DECL_LIST,      S3D,   !F,  0x1FF,  S  ),
+	CMD(  GFX_OP_PIPE_CONTROL(5),           S3D,   !F,  0xFF,   B,
+	      .bits = {{
+			.offset = 1,
+			.mask = (PIPE_CONTROL_MMIO_WRITE | PIPE_CONTROL_NOTIFY),
+			.expected = 0,
+	      },
+	      {
+			.offset = 1,
+		        .mask = (PIPE_CONTROL_GLOBAL_GTT_IVB |
+				 PIPE_CONTROL_STORE_DATA_INDEX),
+			.expected = 0,
+			.condition_offset = 1,
+			.condition_mask = PIPE_CONTROL_POST_SYNC_OP_MASK,
+	      }},						       ),
+};
+
+static const struct drm_i915_cmd_descriptor hsw_render_cmds[] = {
+	CMD(  MI_SET_PREDICATE,                 SMI,    F,  1,      S  ),
+	CMD(  MI_RS_CONTROL,                    SMI,    F,  1,      S  ),
+	CMD(  MI_URB_ATOMIC_ALLOC,              SMI,    F,  1,      S  ),
+	CMD(  MI_SET_APPID,                     SMI,    F,  1,      S  ),
+	CMD(  MI_RS_CONTEXT,                    SMI,    F,  1,      S  ),
+	CMD(  MI_LOAD_SCAN_LINES_INCL,          SMI,   !F,  0x3F,   M  ),
+	CMD(  MI_LOAD_SCAN_LINES_EXCL,          SMI,   !F,  0x3F,   R  ),
+	CMD(  MI_LOAD_REGISTER_REG,             SMI,   !F,  0xFF,   R  ),
+	CMD(  MI_RS_STORE_DATA_IMM,             SMI,   !F,  0xFF,   S  ),
+	CMD(  MI_LOAD_URB_MEM,                  SMI,   !F,  0xFF,   S  ),
+	CMD(  MI_STORE_URB_MEM,                 SMI,   !F,  0xFF,   S  ),
+	CMD(  GFX_OP_3DSTATE_DX9_CONSTANTF_VS,  S3D,   !F,  0x7FF,  S  ),
+	CMD(  GFX_OP_3DSTATE_DX9_CONSTANTF_PS,  S3D,   !F,  0x7FF,  S  ),
+
+	CMD(  GFX_OP_3DSTATE_BINDING_TABLE_EDIT_VS,  S3D,   !F,  0x1FF,  S  ),
+	CMD(  GFX_OP_3DSTATE_BINDING_TABLE_EDIT_GS,  S3D,   !F,  0x1FF,  S  ),
+	CMD(  GFX_OP_3DSTATE_BINDING_TABLE_EDIT_HS,  S3D,   !F,  0x1FF,  S  ),
+	CMD(  GFX_OP_3DSTATE_BINDING_TABLE_EDIT_DS,  S3D,   !F,  0x1FF,  S  ),
+	CMD(  GFX_OP_3DSTATE_BINDING_TABLE_EDIT_PS,  S3D,   !F,  0x1FF,  S  ),
+};
+
+static const struct drm_i915_cmd_descriptor video_cmds[] = {
+	CMD(  MI_ARB_ON_OFF,                    SMI,    F,  1,      R  ),
+	CMD(  MI_SET_APPID,                     SMI,    F,  1,      S  ),
+	CMD(  MI_STORE_DWORD_IMM,               SMI,   !F,  0xFF,   B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_GLOBAL_GTT,
+			.expected = 0,
+	      }},						       ),
+	CMD(  MI_UPDATE_GTT,                    SMI,   !F,  0x3F,   R  ),
+	CMD(  MI_FLUSH_DW,                      SMI,   !F,  0x3F,   B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_FLUSH_DW_NOTIFY,
+			.expected = 0,
+	      },
+	      {
+			.offset = 1,
+			.mask = MI_FLUSH_DW_USE_GTT,
+			.expected = 0,
+			.condition_offset = 0,
+			.condition_mask = MI_FLUSH_DW_OP_MASK,
+	      },
+	      {
+			.offset = 0,
+			.mask = MI_FLUSH_DW_STORE_INDEX,
+			.expected = 0,
+			.condition_offset = 0,
+			.condition_mask = MI_FLUSH_DW_OP_MASK,
+	      }},						       ),
+	CMD(  MI_CONDITIONAL_BATCH_BUFFER_END,  SMI,   !F,  0xFF,   B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_GLOBAL_GTT,
+			.expected = 0,
+	      }},						       ),
+	/*
+	 * MFX_WAIT doesn't fit the way we handle length for most commands.
+	 * It has a length field but it uses a non-standard length bias.
+	 * It is always 1 dword though, so just treat it as fixed length.
+	 */
+	CMD(  MFX_WAIT,                         SMFX,   F,  1,      S  ),
+};
+
+static const struct drm_i915_cmd_descriptor vecs_cmds[] = {
+	CMD(  MI_ARB_ON_OFF,                    SMI,    F,  1,      R  ),
+	CMD(  MI_SET_APPID,                     SMI,    F,  1,      S  ),
+	CMD(  MI_STORE_DWORD_IMM,               SMI,   !F,  0xFF,   B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_GLOBAL_GTT,
+			.expected = 0,
+	      }},						       ),
+	CMD(  MI_UPDATE_GTT,                    SMI,   !F,  0x3F,   R  ),
+	CMD(  MI_FLUSH_DW,                      SMI,   !F,  0x3F,   B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_FLUSH_DW_NOTIFY,
+			.expected = 0,
+	      },
+	      {
+			.offset = 1,
+			.mask = MI_FLUSH_DW_USE_GTT,
+			.expected = 0,
+			.condition_offset = 0,
+			.condition_mask = MI_FLUSH_DW_OP_MASK,
+	      },
+	      {
+			.offset = 0,
+			.mask = MI_FLUSH_DW_STORE_INDEX,
+			.expected = 0,
+			.condition_offset = 0,
+			.condition_mask = MI_FLUSH_DW_OP_MASK,
+	      }},						       ),
+	CMD(  MI_CONDITIONAL_BATCH_BUFFER_END,  SMI,   !F,  0xFF,   B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_GLOBAL_GTT,
+			.expected = 0,
+	      }},						       ),
+};
+
+static const struct drm_i915_cmd_descriptor blt_cmds[] = {
+	CMD(  MI_DISPLAY_FLIP,                  SMI,   !F,  0xFF,   R  ),
+	CMD(  MI_STORE_DWORD_IMM,               SMI,   !F,  0x3FF,  B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_GLOBAL_GTT,
+			.expected = 0,
+	      }},						       ),
+	CMD(  MI_UPDATE_GTT,                    SMI,   !F,  0x3F,   R  ),
+	CMD(  MI_FLUSH_DW,                      SMI,   !F,  0x3F,   B,
+	      .bits = {{
+			.offset = 0,
+			.mask = MI_FLUSH_DW_NOTIFY,
+			.expected = 0,
+	      },
+	      {
+			.offset = 1,
+			.mask = MI_FLUSH_DW_USE_GTT,
+			.expected = 0,
+			.condition_offset = 0,
+			.condition_mask = MI_FLUSH_DW_OP_MASK,
+	      },
+	      {
+			.offset = 0,
+			.mask = MI_FLUSH_DW_STORE_INDEX,
+			.expected = 0,
+			.condition_offset = 0,
+			.condition_mask = MI_FLUSH_DW_OP_MASK,
+	      }},						       ),
+	CMD(  COLOR_BLT,                        S2D,   !F,  0x3F,   S  ),
+	CMD(  SRC_COPY_BLT,                     S2D,   !F,  0x3F,   S  ),
+};
+
+static const struct drm_i915_cmd_descriptor hsw_blt_cmds[] = {
+	CMD(  MI_LOAD_SCAN_LINES_INCL,          SMI,   !F,  0x3F,   M  ),
+	CMD(  MI_LOAD_SCAN_LINES_EXCL,          SMI,   !F,  0x3F,   R  ),
+};
+
+#undef CMD
+#undef SMI
+#undef S3D
+#undef S2D
+#undef SMFX
+#undef F
+#undef S
+#undef R
+#undef W
+#undef B
+#undef M
+
+static const struct drm_i915_cmd_table gen7_render_cmds[] = {
+	{ common_cmds, ARRAY_SIZE(common_cmds) },
+	{ render_cmds, ARRAY_SIZE(render_cmds) },
+};
+
+static const struct drm_i915_cmd_table hsw_render_ring_cmds[] = {
+	{ common_cmds, ARRAY_SIZE(common_cmds) },
+	{ render_cmds, ARRAY_SIZE(render_cmds) },
+	{ hsw_render_cmds, ARRAY_SIZE(hsw_render_cmds) },
+};
+
+static const struct drm_i915_cmd_table gen7_video_cmds[] = {
+	{ common_cmds, ARRAY_SIZE(common_cmds) },
+	{ video_cmds, ARRAY_SIZE(video_cmds) },
+};
+
+static const struct drm_i915_cmd_table hsw_vebox_cmds[] = {
+	{ common_cmds, ARRAY_SIZE(common_cmds) },
+	{ vecs_cmds, ARRAY_SIZE(vecs_cmds) },
+};
+
+static const struct drm_i915_cmd_table gen7_blt_cmds[] = {
+	{ common_cmds, ARRAY_SIZE(common_cmds) },
+	{ blt_cmds, ARRAY_SIZE(blt_cmds) },
+};
+
+static const struct drm_i915_cmd_table hsw_blt_ring_cmds[] = {
+	{ common_cmds, ARRAY_SIZE(common_cmds) },
+	{ blt_cmds, ARRAY_SIZE(blt_cmds) },
+	{ hsw_blt_cmds, ARRAY_SIZE(hsw_blt_cmds) },
+};
+
+/*
+ * Register whitelists, sorted by increasing register offset.
+ */
+
+/*
+ * An individual whitelist entry granting access to register addr.  If
+ * mask is non-zero the argument of immediate register writes will be
+ * AND-ed with mask, and the command will be rejected if the result
+ * doesn't match value.
+ *
+ * Registers with non-zero mask are only allowed to be written using
+ * LRI.
+ */
+struct drm_i915_reg_descriptor {
+	u32 addr;
+	u32 mask;
+	u32 value;
+};
+
+/* Convenience macro for adding 32-bit registers. */
+#define REG32(address, ...)                             \
+	{ .addr = address, __VA_ARGS__ }
+
+/*
+ * Convenience macro for adding 64-bit registers.
+ *
+ * Some registers that userspace accesses are 64 bits. The register
+ * access commands only allow 32-bit accesses. Hence, we have to include
+ * entries for both halves of the 64-bit registers.
+ */
+#define REG64(addr)                                     \
+	REG32(addr), REG32(addr + sizeof(u32))
+
+static const struct drm_i915_reg_descriptor gen7_render_regs[] = {
+	REG64(GPGPU_THREADS_DISPATCHED),
+	REG64(HS_INVOCATION_COUNT),
+	REG64(DS_INVOCATION_COUNT),
+	REG64(IA_VERTICES_COUNT),
+	REG64(IA_PRIMITIVES_COUNT),
+	REG64(VS_INVOCATION_COUNT),
+	REG64(GS_INVOCATION_COUNT),
+	REG64(GS_PRIMITIVES_COUNT),
+	REG64(CL_INVOCATION_COUNT),
+	REG64(CL_PRIMITIVES_COUNT),
+	REG64(PS_INVOCATION_COUNT),
+	REG64(PS_DEPTH_COUNT),
+	REG32(OACONTROL), /* Only allowed for LRI and SRM. See below. */
+	REG64(MI_PREDICATE_SRC0),
+	REG64(MI_PREDICATE_SRC1),
+	REG32(GEN7_3DPRIM_END_OFFSET),
+	REG32(GEN7_3DPRIM_START_VERTEX),
+	REG32(GEN7_3DPRIM_VERTEX_COUNT),
+	REG32(GEN7_3DPRIM_INSTANCE_COUNT),
+	REG32(GEN7_3DPRIM_START_INSTANCE),
+	REG32(GEN7_3DPRIM_BASE_VERTEX),
+	REG32(GEN7_GPGPU_DISPATCHDIMX),
+	REG32(GEN7_GPGPU_DISPATCHDIMY),
+	REG32(GEN7_GPGPU_DISPATCHDIMZ),
+	REG64(GEN7_SO_NUM_PRIMS_WRITTEN(0)),
+	REG64(GEN7_SO_NUM_PRIMS_WRITTEN(1)),
+	REG64(GEN7_SO_NUM_PRIMS_WRITTEN(2)),
+	REG64(GEN7_SO_NUM_PRIMS_WRITTEN(3)),
+	REG64(GEN7_SO_PRIM_STORAGE_NEEDED(0)),
+	REG64(GEN7_SO_PRIM_STORAGE_NEEDED(1)),
+	REG64(GEN7_SO_PRIM_STORAGE_NEEDED(2)),
+	REG64(GEN7_SO_PRIM_STORAGE_NEEDED(3)),
+	REG32(GEN7_SO_WRITE_OFFSET(0)),
+	REG32(GEN7_SO_WRITE_OFFSET(1)),
+	REG32(GEN7_SO_WRITE_OFFSET(2)),
+	REG32(GEN7_SO_WRITE_OFFSET(3)),
+	REG32(GEN7_L3SQCREG1),
+	REG32(GEN7_L3CNTLREG2),
+	REG32(GEN7_L3CNTLREG3),
+	REG32(HSW_SCRATCH1,
+	      .mask = ~HSW_SCRATCH1_L3_DATA_ATOMICS_DISABLE,
+	      .value = 0),
+	REG32(HSW_ROW_CHICKEN3,
+	      .mask = ~(HSW_ROW_CHICKEN3_L3_GLOBAL_ATOMICS_DISABLE << 16 |
+                        HSW_ROW_CHICKEN3_L3_GLOBAL_ATOMICS_DISABLE),
+	      .value = 0),
+};
+
+static const struct drm_i915_reg_descriptor gen7_blt_regs[] = {
+	REG32(BCS_SWCTRL),
+};
+
+static const struct drm_i915_reg_descriptor ivb_master_regs[] = {
+	REG32(FORCEWAKE_MT),
+	REG32(DERRMR),
+	REG32(GEN7_PIPE_DE_LOAD_SL(PIPE_A)),
+	REG32(GEN7_PIPE_DE_LOAD_SL(PIPE_B)),
+	REG32(GEN7_PIPE_DE_LOAD_SL(PIPE_C)),
+};
+
+static const struct drm_i915_reg_descriptor hsw_master_regs[] = {
+	REG32(FORCEWAKE_MT),
+	REG32(DERRMR),
+};
+
+#undef REG64
+#undef REG32
 
 static u32 gen7_render_get_cmd_length_mask(u32 cmd_header)
 {
@@ -110,13 +519,17 @@ static u32 gen7_bsd_get_cmd_length_mask(u32 cmd_header)
 	u32 client = (cmd_header & INSTR_CLIENT_MASK) >> INSTR_CLIENT_SHIFT;
 	u32 subclient =
 		(cmd_header & INSTR_SUBCLIENT_MASK) >> INSTR_SUBCLIENT_SHIFT;
+	u32 op = (cmd_header & INSTR_26_TO_24_MASK) >> INSTR_26_TO_24_SHIFT;
 
 	if (client == INSTR_MI_CLIENT)
 		return 0x3F;
 	else if (client == INSTR_RC_CLIENT) {
-		if (subclient == INSTR_MEDIA_SUBCLIENT)
-			return 0xFFF;
-		else
+		if (subclient == INSTR_MEDIA_SUBCLIENT) {
+			if (op == 6)
+				return 0xFFFF;
+			else
+				return 0xFFF;
+		} else
 			return 0xFF;
 	}
 
@@ -137,52 +550,129 @@ static u32 gen7_blt_get_cmd_length_mask(u32 cmd_header)
 	return 0;
 }
 
-static void validate_cmds_sorted(struct intel_ring_buffer *ring)
+static bool validate_cmds_sorted(struct intel_engine_cs *ring,
+				 const struct drm_i915_cmd_table *cmd_tables,
+				 int cmd_table_count)
 {
 	int i;
+	bool ret = true;
 
-	if (!ring->cmd_tables || ring->cmd_table_count == 0)
-		return;
+	if (!cmd_tables || cmd_table_count == 0)
+		return true;
 
-	for (i = 0; i < ring->cmd_table_count; i++) {
-		const struct drm_i915_cmd_table *table = &ring->cmd_tables[i];
+	for (i = 0; i < cmd_table_count; i++) {
+		const struct drm_i915_cmd_table *table = &cmd_tables[i];
 		u32 previous = 0;
 		int j;
 
 		for (j = 0; j < table->count; j++) {
 			const struct drm_i915_cmd_descriptor *desc =
-				&table->table[i];
+				&table->table[j];
 			u32 curr = desc->cmd.value & desc->cmd.mask;
 
-			if (curr < previous)
+			if (curr < previous) {
 				DRM_ERROR("CMD: table not sorted ring=%d table=%d entry=%d cmd=0x%08X prev=0x%08X\n",
 					  ring->id, i, j, curr, previous);
+				ret = false;
+			}
 
 			previous = curr;
 		}
 	}
+
+	return ret;
 }
 
-static void check_sorted(int ring_id, const u32 *reg_table, int reg_count)
+static bool check_sorted(int ring_id,
+			 const struct drm_i915_reg_descriptor *reg_table,
+			 int reg_count)
 {
 	int i;
 	u32 previous = 0;
+	bool ret = true;
 
 	for (i = 0; i < reg_count; i++) {
-		u32 curr = reg_table[i];
+		u32 curr = reg_table[i].addr;
 
-		if (curr < previous)
+		if (curr < previous) {
 			DRM_ERROR("CMD: table not sorted ring=%d entry=%d reg=0x%08X prev=0x%08X\n",
 				  ring_id, i, curr, previous);
+			ret = false;
+		}
 
 		previous = curr;
 	}
+
+	return ret;
 }
 
-static void validate_regs_sorted(struct intel_ring_buffer *ring)
+static bool validate_regs_sorted(struct intel_engine_cs *ring)
 {
-	check_sorted(ring->id, ring->reg_table, ring->reg_count);
-	check_sorted(ring->id, ring->master_reg_table, ring->master_reg_count);
+	return check_sorted(ring->id, ring->reg_table, ring->reg_count) &&
+		check_sorted(ring->id, ring->master_reg_table,
+			     ring->master_reg_count);
+}
+
+struct cmd_node {
+	const struct drm_i915_cmd_descriptor *desc;
+	struct hlist_node node;
+};
+
+/*
+ * Different command ranges have different numbers of bits for the opcode. For
+ * example, MI commands use bits 31:23 while 3D commands use bits 31:16. The
+ * problem is that, for example, MI commands use bits 22:16 for other fields
+ * such as GGTT vs PPGTT bits. If we include those bits in the mask then when
+ * we mask a command from a batch it could hash to the wrong bucket due to
+ * non-opcode bits being set. But if we don't include those bits, some 3D
+ * commands may hash to the same bucket due to not including opcode bits that
+ * make the command unique. For now, we will risk hashing to the same bucket.
+ *
+ * If we attempt to generate a perfect hash, we should be able to look at bits
+ * 31:29 of a command from a batch buffer and use the full mask for that
+ * client. The existing INSTR_CLIENT_MASK/SHIFT defines can be used for this.
+ */
+#define CMD_HASH_MASK STD_MI_OPCODE_MASK
+
+static int init_hash_table(struct intel_engine_cs *ring,
+			   const struct drm_i915_cmd_table *cmd_tables,
+			   int cmd_table_count)
+{
+	int i, j;
+
+	hash_init(ring->cmd_hash);
+
+	for (i = 0; i < cmd_table_count; i++) {
+		const struct drm_i915_cmd_table *table = &cmd_tables[i];
+
+		for (j = 0; j < table->count; j++) {
+			const struct drm_i915_cmd_descriptor *desc =
+				&table->table[j];
+			struct cmd_node *desc_node =
+				kmalloc(sizeof(*desc_node), GFP_KERNEL);
+
+			if (!desc_node)
+				return -ENOMEM;
+
+			desc_node->desc = desc;
+			hash_add(ring->cmd_hash, &desc_node->node,
+				 desc->cmd.value & CMD_HASH_MASK);
+		}
+	}
+
+	return 0;
+}
+
+static void fini_hash_table(struct intel_engine_cs *ring)
+{
+	struct hlist_node *tmp;
+	struct cmd_node *desc_node;
+	int i;
+
+	hash_for_each_safe(ring->cmd_hash, i, tmp, desc_node, node) {
+		hash_del(&desc_node->node);
+		kfree(desc_node);
+	}
 }
 
 /**
@@ -190,25 +680,74 @@ static void validate_regs_sorted(struct intel_ring_buffer *ring)
  * @ring: the ringbuffer to initialize
  *
  * Optionally initializes fields related to batch buffer command parsing in the
- * struct intel_ring_buffer based on whether the platform requires software
+ * struct intel_engine_cs based on whether the platform requires software
  * command parsing.
+ *
+ * Return: non-zero if initialization fails
  */
-void i915_cmd_parser_init_ring(struct intel_ring_buffer *ring)
+int i915_cmd_parser_init_ring(struct intel_engine_cs *ring)
 {
+	const struct drm_i915_cmd_table *cmd_tables;
+	int cmd_table_count;
+	int ret;
+
 	if (!IS_GEN7(ring->dev))
-		return;
+		return 0;
 
 	switch (ring->id) {
 	case RCS:
+		if (IS_HASWELL(ring->dev)) {
+			cmd_tables = hsw_render_ring_cmds;
+			cmd_table_count =
+				ARRAY_SIZE(hsw_render_ring_cmds);
+		} else {
+			cmd_tables = gen7_render_cmds;
+			cmd_table_count = ARRAY_SIZE(gen7_render_cmds);
+		}
+
+		ring->reg_table = gen7_render_regs;
+		ring->reg_count = ARRAY_SIZE(gen7_render_regs);
+
+		if (IS_HASWELL(ring->dev)) {
+			ring->master_reg_table = hsw_master_regs;
+			ring->master_reg_count = ARRAY_SIZE(hsw_master_regs);
+		} else {
+			ring->master_reg_table = ivb_master_regs;
+			ring->master_reg_count = ARRAY_SIZE(ivb_master_regs);
+		}
+
 		ring->get_cmd_length_mask = gen7_render_get_cmd_length_mask;
 		break;
 	case VCS:
+		cmd_tables = gen7_video_cmds;
+		cmd_table_count = ARRAY_SIZE(gen7_video_cmds);
 		ring->get_cmd_length_mask = gen7_bsd_get_cmd_length_mask;
 		break;
 	case BCS:
+		if (IS_HASWELL(ring->dev)) {
+			cmd_tables = hsw_blt_ring_cmds;
+			cmd_table_count = ARRAY_SIZE(hsw_blt_ring_cmds);
+		} else {
+			cmd_tables = gen7_blt_cmds;
+			cmd_table_count = ARRAY_SIZE(gen7_blt_cmds);
+		}
+
+		ring->reg_table = gen7_blt_regs;
+		ring->reg_count = ARRAY_SIZE(gen7_blt_regs);
+
+		if (IS_HASWELL(ring->dev)) {
+			ring->master_reg_table = hsw_master_regs;
+			ring->master_reg_count = ARRAY_SIZE(hsw_master_regs);
+		} else {
+			ring->master_reg_table = ivb_master_regs;
+			ring->master_reg_count = ARRAY_SIZE(ivb_master_regs);
+		}
+
 		ring->get_cmd_length_mask = gen7_blt_get_cmd_length_mask;
 		break;
 	case VECS:
+		cmd_tables = hsw_vebox_cmds;
+		cmd_table_count = ARRAY_SIZE(hsw_vebox_cmds);
 		/* VECS can use the same length_mask function as VCS */
 		ring->get_cmd_length_mask = gen7_bsd_get_cmd_length_mask;
 		break;
@@ -218,18 +757,47 @@ void i915_cmd_parser_init_ring(struct intel_ring_buffer *ring)
 		BUG();
 	}
 
-	validate_cmds_sorted(ring);
-	validate_regs_sorted(ring);
+	BUG_ON(!validate_cmds_sorted(ring, cmd_tables, cmd_table_count));
+	BUG_ON(!validate_regs_sorted(ring));
+
+	WARN_ON(!hash_empty(ring->cmd_hash));
+
+	ret = init_hash_table(ring, cmd_tables, cmd_table_count);
+	if (ret) {
+		DRM_ERROR("CMD: cmd_parser_init failed!\n");
+		fini_hash_table(ring);
+		return ret;
+	}
+
+	ring->needs_cmd_parser = true;
+
+	return 0;
+}
+
+/**
+ * i915_cmd_parser_fini_ring() - clean up cmd parser related fields
+ * @ring: the ringbuffer to clean up
+ *
+ * Releases any resources related to command parsing that may have been
+ * initialized for the specified ring.
+ */
+void i915_cmd_parser_fini_ring(struct intel_engine_cs *ring)
+{
+	if (!ring->needs_cmd_parser)
+		return;
+
+	fini_hash_table(ring);
 }
 
 static const struct drm_i915_cmd_descriptor*
-find_cmd_in_table(const struct drm_i915_cmd_table *table,
+find_cmd_in_table(struct intel_engine_cs *ring,
 		  u32 cmd_header)
 {
-	int i;
+	struct cmd_node *desc_node;
 
-	for (i = 0; i < table->count; i++) {
-		const struct drm_i915_cmd_descriptor *desc = &table->table[i];
+	hash_for_each_possible(ring->cmd_hash, desc_node, node,
+			       cmd_header & CMD_HASH_MASK) {
+		const struct drm_i915_cmd_descriptor *desc = desc_node->desc;
 		u32 masked_cmd = desc->cmd.mask & cmd_header;
 		u32 masked_value = desc->cmd.value & desc->cmd.mask;
 
@@ -249,20 +817,16 @@ find_cmd_in_table(const struct drm_i915_cmd_table *table,
  * ring's default length encoding and returns default_desc.
  */
 static const struct drm_i915_cmd_descriptor*
-find_cmd(struct intel_ring_buffer *ring,
+find_cmd(struct intel_engine_cs *ring,
 	 u32 cmd_header,
 	 struct drm_i915_cmd_descriptor *default_desc)
 {
+	const struct drm_i915_cmd_descriptor *desc;
 	u32 mask;
-	int i;
 
-	for (i = 0; i < ring->cmd_table_count; i++) {
-		const struct drm_i915_cmd_descriptor *desc;
-
-		desc = find_cmd_in_table(&ring->cmd_tables[i], cmd_header);
-		if (desc)
-			return desc;
-	}
+	desc = find_cmd_in_table(ring, cmd_header);
+	if (desc)
+		return desc;
 
 	mask = ring->get_cmd_length_mask(cmd_header);
 	if (!mask)
@@ -495,7 +1059,29 @@ int i915_parse_cmds(struct intel_ring_buffer *ring,
 	vunmap(batch_base);
 #endif
 
-	i915_gem_object_unpin_pages(batch_obj);
-
 	return ret;
+}
+
+/**
+ * i915_cmd_parser_get_version() - get the cmd parser version number
+ *
+ * The cmd parser maintains a simple increasing integer version number suitable
+ * for passing to userspace clients to determine what operations are permitted.
+ *
+ * Return: the current version number of the cmd parser
+ */
+int i915_cmd_parser_get_version(void)
+{
+	/*
+	 * Command parser version history
+	 *
+	 * 1. Initial version. Checks batches and reports violations, but leaves
+	 *    hardware parsing enabled (so does not allow new use cases).
+	 * 2. Allow access to the MI_PREDICATE_SRC0 and
+	 *    MI_PREDICATE_SRC1 registers.
+	 * 3. Allow access to the GPGPU_THREADS_DISPATCHED register.
+	 * 4. L3 atomic chicken bits of HSW_SCRATCH1 and HSW_ROW_CHICKEN3.
+	 * 5. GPGPU dispatch compute indirect registers.
+	 */
+	return 5;
 }

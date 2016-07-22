@@ -1,0 +1,24 @@
+--- radeon/radeon_bios.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/radeon_bios.c	2016-07-12 01:31:24.000000000 +0900
+@@ -85,15 +84,19 @@ static bool radeon_read_bios(struct rade
+ 		return false;
+ 	}
+ 
+-	if (size == 0 || bios[0] != 0x55 || bios[1] != 0xaa) {
++	val1 = readb(&bios[0]);
++	val2 = readb(&bios[1]);
++
++	if (size == 0 || val1 != 0x55 || val2 != 0xaa) {
+ 		pci_unmap_rom(rdev->pdev, bios);
+ 		return false;
+ 	}
+-	rdev->bios = kmemdup(bios, size, GFP_KERNEL);
++	rdev->bios = kzalloc(size, GFP_KERNEL);
+ 	if (rdev->bios == NULL) {
+ 		pci_unmap_rom(rdev->pdev, bios);
+ 		return false;
+ 	}
++	memcpy_fromio(rdev->bios, bios, size);
+ 	pci_unmap_rom(rdev->pdev, bios);
+ 	return true;
+ }

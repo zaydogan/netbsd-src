@@ -1,0 +1,53 @@
+--- radeon/r600_dma.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/r600_dma.c	2016-07-12 01:31:24.000000000 +0900
+@@ -232,16 +223,19 @@ int r600_dma_ring_test(struct radeon_dev
+ {
+ 	unsigned i;
+ 	int r;
+-	void __iomem *ptr = (void *)rdev->vram_scratch.ptr;
++	unsigned index;
+ 	u32 tmp;
++	u64 gpu_addr;
+ 
+-	if (!ptr) {
+-		DRM_ERROR("invalid vram scratch pointer\n");
+-		return -EINVAL;
+-	}
++	if (ring->idx == R600_RING_TYPE_DMA_INDEX)
++		index = R600_WB_DMA_RING_TEST_OFFSET;
++	else
++		index = CAYMAN_WB_DMA1_RING_TEST_OFFSET;
++
++	gpu_addr = rdev->wb.gpu_addr + index;
+ 
+ 	tmp = 0xCAFEDEAD;
+-	writel(tmp, ptr);
++	rdev->wb.wb[index/4] = cpu_to_le32(tmp);
+ 
+ 	r = radeon_ring_lock(rdev, ring, 4);
+ 	if (r) {
+@@ -335,17 +329,17 @@ int r600_dma_ib_test(struct radeon_devic
+ {
+ 	struct radeon_ib ib;
+ 	unsigned i;
++	unsigned index;
+ 	int r;
+-	void __iomem *ptr = (void *)rdev->vram_scratch.ptr;
+ 	u32 tmp = 0;
++	u64 gpu_addr;
+ 
+-	if (!ptr) {
+-		DRM_ERROR("invalid vram scratch pointer\n");
+-		return -EINVAL;
+-	}
++	if (ring->idx == R600_RING_TYPE_DMA_INDEX)
++		index = R600_WB_DMA_RING_TEST_OFFSET;
++	else
++		index = CAYMAN_WB_DMA1_RING_TEST_OFFSET;
+ 
+-	tmp = 0xCAFEDEAD;
+-	writel(tmp, ptr);
++	gpu_addr = rdev->wb.gpu_addr + index;
+ 
+ 	r = radeon_ib_get(rdev, ring->idx, &ib, NULL, 256);
+ 	if (r) {

@@ -1,0 +1,54 @@
+--- radeon/radeon_ttm.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/radeon_ttm.c	2016-07-12 01:31:24.000000000 +0900
+@@ -702,10 +816,17 @@ static struct ttm_tt *radeon_ttm_tt_crea
+ 	return &gtt->ttm.ttm;
+ }
+ 
++static struct radeon_ttm_tt *radeon_ttm_tt_to_gtt(struct ttm_tt *ttm)
++{
++	if (!ttm || ttm->func != &radeon_backend_func)
++		return NULL;
++	return (struct radeon_ttm_tt *)ttm;
++}
++
+ static int radeon_ttm_tt_populate(struct ttm_tt *ttm)
+ {
++	struct radeon_ttm_tt *gtt = radeon_ttm_tt_to_gtt(ttm);
+ 	struct radeon_device *rdev;
+-	struct radeon_ttm_tt *gtt = (void *)ttm;
+ 	unsigned i;
+ 	int r;
+ 	bool slave = !!(ttm->page_flags & TTM_PAGE_FLAG_SG);
+@@ -731,7 +862,7 @@ static int radeon_ttm_tt_populate(struct
+ 	}
+ 
+ 	rdev = radeon_get_rdev(ttm->bdev);
+-#if __OS_HAS_AGP
++#if IS_ENABLED(CONFIG_AGP)
+ 	if (rdev->flags & RADEON_IS_AGP) {
+ 		return ttm_agp_tt_populate(ttm);
+ 	}
+@@ -768,15 +899,21 @@ static int radeon_ttm_tt_populate(struct
+ static void radeon_ttm_tt_unpopulate(struct ttm_tt *ttm)
+ {
+ 	struct radeon_device *rdev;
+-	struct radeon_ttm_tt *gtt = (void *)ttm;
++	struct radeon_ttm_tt *gtt = radeon_ttm_tt_to_gtt(ttm);
+ 	unsigned i;
+ 	bool slave = !!(ttm->page_flags & TTM_PAGE_FLAG_SG);
+ 
++	if (gtt && gtt->userptr) {
++		kfree(ttm->sg);
++		ttm->page_flags &= ~TTM_PAGE_FLAG_SG;
++		return;
++	}
++
+ 	if (slave)
+ 		return;
+ 
+ 	rdev = radeon_get_rdev(ttm->bdev);
+-#if __OS_HAS_AGP
++#if IS_ENABLED(CONFIG_AGP)
+ 	if (rdev->flags & RADEON_IS_AGP) {
+ 		ttm_agp_tt_unpopulate(ttm);
+ 		return;

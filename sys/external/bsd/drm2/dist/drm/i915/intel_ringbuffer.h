@@ -3,6 +3,19 @@
 
 #include <asm/bug.h>
 
+#include <linux/hashtable.h>
+#include "i915_gem_batch_pool.h"
+
+#define I915_CMD_HASH_ORDER 9
+
+/* Early gen2 devices have a cacheline of just 32 bytes, using 64 is overkill,
+ * but keeps the logic simple. Indeed, the whole purpose of this macro is just
+ * to give some inclination as to some of the magic values used in the various
+ * workarounds!
+ */
+#define CACHELINE_BYTES 64
+#define CACHELINE_DWORDS (CACHELINE_BYTES / sizeof(uint32_t))
+
 /*
  * Gen2 BSpec "1. Programming Environment" / 1.4.4.6 "Ring Buffer Use"
  * Gen3 BSpec "vol1c Memory Interface Functions" / 2.3.4.5 "Ring Buffer Use"
@@ -38,10 +51,37 @@ struct  intel_hw_status_page {
 #define I915_READ_MODE(ring) I915_READ(RING_MI_MODE((ring)->mmio_base))
 #define I915_WRITE_MODE(ring, val) I915_WRITE(RING_MI_MODE((ring)->mmio_base), val)
 
+/* seqno size is actually only a uint32, but since we plan to use MI_FLUSH_DW to
+ * do the writes, and that must have qw aligned offsets, simply pretend it's 8b.
+ */
+#define i915_semaphore_seqno_size sizeof(uint64_t)
+#define GEN8_SIGNAL_OFFSET(__ring, to)			     \
+	(i915_gem_obj_ggtt_offset(dev_priv->semaphore_obj) + \
+	((__ring)->id * I915_NUM_RINGS * i915_semaphore_seqno_size) +	\
+	(i915_semaphore_seqno_size * (to)))
+
+#define GEN8_WAIT_OFFSET(__ring, from)			     \
+	(i915_gem_obj_ggtt_offset(dev_priv->semaphore_obj) + \
+	((from) * I915_NUM_RINGS * i915_semaphore_seqno_size) + \
+	(i915_semaphore_seqno_size * (__ring)->id))
+
+#define GEN8_RING_SEMAPHORE_INIT do { \
+	if (!dev_priv->semaphore_obj) { \
+		break; \
+	} \
+	ring->semaphore.signal_ggtt[RCS] = GEN8_SIGNAL_OFFSET(ring, RCS); \
+	ring->semaphore.signal_ggtt[VCS] = GEN8_SIGNAL_OFFSET(ring, VCS); \
+	ring->semaphore.signal_ggtt[BCS] = GEN8_SIGNAL_OFFSET(ring, BCS); \
+	ring->semaphore.signal_ggtt[VECS] = GEN8_SIGNAL_OFFSET(ring, VECS); \
+	ring->semaphore.signal_ggtt[VCS2] = GEN8_SIGNAL_OFFSET(ring, VCS2); \
+	ring->semaphore.signal_ggtt[ring->id] = MI_SEMAPHORE_SYNC_INVALID; \
+	} while(0)
+
 enum intel_ring_hangcheck_action {
 	HANGCHECK_IDLE = 0,
 	HANGCHECK_WAIT,
 	HANGCHECK_ACTIVE,
+	HANGCHECK_ACTIVE_LOOP,
 	HANGCHECK_KICK,
 	HANGCHECK_HUNG,
 };
@@ -183,24 +223,25 @@ struct  intel_ring_buffer {
 		volatile u32 *cpu_page;
 	} scratch;
 
+	bool needs_cmd_parser;
+
 	/*
-	 * Tables of commands the command parser needs to know about
+	 * Table of commands the command parser needs to know about
 	 * for this ring.
 	 */
-	const struct drm_i915_cmd_table *cmd_tables;
-	int cmd_table_count;
+	DECLARE_HASHTABLE(cmd_hash, I915_CMD_HASH_ORDER);
 
 	/*
 	 * Table of registers allowed in commands that read/write registers.
 	 */
-	const u32 *reg_table;
+	const struct drm_i915_reg_descriptor *reg_table;
 	int reg_count;
 
 	/*
 	 * Table of registers allowed in commands that read/write registers, but
 	 * only from the DRM master.
 	 */
-	const u32 *master_reg_table;
+	const struct drm_i915_reg_descriptor *master_reg_table;
 	int master_reg_count;
 
 	/*
@@ -216,28 +257,26 @@ struct  intel_ring_buffer {
 	u32 (*get_cmd_length_mask)(u32 cmd_header);
 };
 
-static inline bool
-intel_ring_initialized(struct intel_ring_buffer *ring)
-{
-	return ring->obj != NULL;
-}
+bool intel_ring_initialized(struct intel_engine_cs *ring);
 
 static inline unsigned
-intel_ring_flag(struct intel_ring_buffer *ring)
+intel_ring_flag(struct intel_engine_cs *ring)
 {
 	return 1 << ring->id;
 }
 
 static inline u32
-intel_ring_sync_index(struct intel_ring_buffer *ring,
-		      struct intel_ring_buffer *other)
+intel_ring_sync_index(struct intel_engine_cs *ring,
+		      struct intel_engine_cs *other)
 {
 	int idx;
 
 	/*
-	 * cs -> 0 = vcs, 1 = bcs
-	 * vcs -> 0 = bcs, 1 = cs,
-	 * bcs -> 0 = cs, 1 = vcs.
+	 * rcs -> 0 = vcs, 1 = bcs, 2 = vecs, 3 = vcs2;
+	 * vcs -> 0 = bcs, 1 = vecs, 2 = vcs2, 3 = rcs;
+	 * bcs -> 0 = vecs, 1 = vcs2. 2 = rcs, 3 = vcs;
+	 * vecs -> 0 = vcs2, 1 = rcs, 2 = vcs, 3 = bcs;
+	 * vcs2 -> 0 = rcs, 1 = vcs, 2 = bcs, 3 = vecs;
 	 */
 
 	idx = (other - ring) - 1;
@@ -247,8 +286,15 @@ intel_ring_sync_index(struct intel_ring_buffer *ring,
 	return idx;
 }
 
+static inline void
+intel_flush_status_page(struct intel_engine_cs *ring, int reg)
+{
+	drm_clflush_virt_range(&ring->status_page.page_addr[reg],
+			       sizeof(uint32_t));
+}
+
 static inline u32
-intel_read_status_page(struct intel_ring_buffer *ring,
+intel_read_status_page(struct intel_engine_cs *ring,
 		       int reg)
 {
 	/* Ensure that the compiler doesn't optimize away the load. */
@@ -257,7 +303,7 @@ intel_read_status_page(struct intel_ring_buffer *ring,
 }
 
 static inline void
-intel_write_status_page(struct intel_ring_buffer *ring,
+intel_write_status_page(struct intel_engine_cs *ring,
 			int reg, u32 value)
 {
 	ring->status_page.page_addr[reg] = value;

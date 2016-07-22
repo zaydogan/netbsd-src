@@ -1,0 +1,67 @@
+--- radeon/r100.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/r100.c	2016-07-12 01:31:24.000000000 +0900
+@@ -3217,6 +3218,12 @@ void r100_bandwidth_update(struct radeon
+ 	uint32_t pixel_bytes1 = 0;
+ 	uint32_t pixel_bytes2 = 0;
+ 
++	/* Guess line buffer size to be 8192 pixels */
++	u32 lb_size = 8192;
++
++	if (!rdev->mode_info.mode_config_initialized)
++		return;
++
+ 	radeon_update_display_priority(rdev);
+ 
+ 	if (rdev->mode_info.crtcs[0]->base.enabled) {
+@@ -4094,37 +4108,26 @@ int r100_init(struct radeon_device *rdev
+ 	return 0;
+ }
+ 
+-uint32_t r100_mm_rreg(struct radeon_device *rdev, uint32_t reg,
+-		      bool always_indirect)
++uint32_t r100_mm_rreg_slow(struct radeon_device *rdev, uint32_t reg)
+ {
+-	if (reg < rdev->rmmio_size && !always_indirect)
+-		return readl(((void __iomem *)rdev->rmmio) + reg);
+-	else {
+-		unsigned long flags;
+-		uint32_t ret;
+-
+-		spin_lock_irqsave(&rdev->mmio_idx_lock, flags);
+-		writel(reg, ((void __iomem *)rdev->rmmio) + RADEON_MM_INDEX);
+-		ret = readl(((void __iomem *)rdev->rmmio) + RADEON_MM_DATA);
+-		spin_unlock_irqrestore(&rdev->mmio_idx_lock, flags);
++	unsigned long flags;
++	uint32_t ret;
+ 
+-		return ret;
+-	}
++	spin_lock_irqsave(&rdev->mmio_idx_lock, flags);
++	writel(reg, ((void __iomem *)rdev->rmmio) + RADEON_MM_INDEX);
++	ret = readl(((void __iomem *)rdev->rmmio) + RADEON_MM_DATA);
++	spin_unlock_irqrestore(&rdev->mmio_idx_lock, flags);
++	return ret;
+ }
+ 
+-void r100_mm_wreg(struct radeon_device *rdev, uint32_t reg, uint32_t v,
+-		  bool always_indirect)
++void r100_mm_wreg_slow(struct radeon_device *rdev, uint32_t reg, uint32_t v)
+ {
+-	if (reg < rdev->rmmio_size && !always_indirect)
+-		writel(v, ((void __iomem *)rdev->rmmio) + reg);
+-	else {
+-		unsigned long flags;
++	unsigned long flags;
+ 
+-		spin_lock_irqsave(&rdev->mmio_idx_lock, flags);
+-		writel(reg, ((void __iomem *)rdev->rmmio) + RADEON_MM_INDEX);
+-		writel(v, ((void __iomem *)rdev->rmmio) + RADEON_MM_DATA);
+-		spin_unlock_irqrestore(&rdev->mmio_idx_lock, flags);
+-	}
++	spin_lock_irqsave(&rdev->mmio_idx_lock, flags);
++	writel(reg, ((void __iomem *)rdev->rmmio) + RADEON_MM_INDEX);
++	writel(v, ((void __iomem *)rdev->rmmio) + RADEON_MM_DATA);
++	spin_unlock_irqrestore(&rdev->mmio_idx_lock, flags);
+ }
+ 
+ u32 r100_io_rreg(struct radeon_device *rdev, u32 reg)

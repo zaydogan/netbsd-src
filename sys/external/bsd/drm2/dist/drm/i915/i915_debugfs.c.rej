@@ -1,0 +1,318 @@
+--- i915/i915_debugfs.c	2016-07-22 15:48:07.000000000 +0900
++++ i915/i915_debugfs.c	2016-07-12 01:31:24.000000000 +0900
+@@ -2997,12 +3637,315 @@ static int i915_display_info(struct seq_
+ 	return 0;
+ }
+ 
++static int i915_semaphore_status(struct seq_file *m, void *unused)
++{
++	struct drm_info_node *node = (struct drm_info_node *) m->private;
++	struct drm_device *dev = node->minor->dev;
++	struct drm_i915_private *dev_priv = dev->dev_private;
++	struct intel_engine_cs *ring;
++	int num_rings = hweight32(INTEL_INFO(dev)->ring_mask);
++	int i, j, ret;
++
++	if (!i915_semaphore_is_enabled(dev)) {
++		seq_puts(m, "Semaphores are disabled\n");
++		return 0;
++	}
++
++	ret = mutex_lock_interruptible(&dev->struct_mutex);
++	if (ret)
++		return ret;
++	intel_runtime_pm_get(dev_priv);
++
++	if (IS_BROADWELL(dev)) {
++		struct page *page;
++		uint64_t *seqno;
++
++		page = i915_gem_object_get_page(dev_priv->semaphore_obj, 0);
++
++		seqno = (uint64_t *)kmap_atomic(page);
++		for_each_ring(ring, dev_priv, i) {
++			uint64_t offset;
++
++			seq_printf(m, "%s\n", ring->name);
++
++			seq_puts(m, "  Last signal:");
++			for (j = 0; j < num_rings; j++) {
++				offset = i * I915_NUM_RINGS + j;
++				seq_printf(m, "0x%08llx (0x%02llx) ",
++					   seqno[offset], offset * 8);
++			}
++			seq_putc(m, '\n');
++
++			seq_puts(m, "  Last wait:  ");
++			for (j = 0; j < num_rings; j++) {
++				offset = i + (j * I915_NUM_RINGS);
++				seq_printf(m, "0x%08llx (0x%02llx) ",
++					   seqno[offset], offset * 8);
++			}
++			seq_putc(m, '\n');
++
++		}
++		kunmap_atomic(seqno);
++	} else {
++		seq_puts(m, "  Last signal:");
++		for_each_ring(ring, dev_priv, i)
++			for (j = 0; j < num_rings; j++)
++				seq_printf(m, "0x%08x\n",
++					   I915_READ(ring->semaphore.mbox.signal[j]));
++		seq_putc(m, '\n');
++	}
++
++	seq_puts(m, "\nSync seqno:\n");
++	for_each_ring(ring, dev_priv, i) {
++		for (j = 0; j < num_rings; j++) {
++			seq_printf(m, "  0x%08x ", ring->semaphore.sync_seqno[j]);
++		}
++		seq_putc(m, '\n');
++	}
++	seq_putc(m, '\n');
++
++	intel_runtime_pm_put(dev_priv);
++	mutex_unlock(&dev->struct_mutex);
++	return 0;
++}
++
++static int i915_shared_dplls_info(struct seq_file *m, void *unused)
++{
++	struct drm_info_node *node = (struct drm_info_node *) m->private;
++	struct drm_device *dev = node->minor->dev;
++	struct drm_i915_private *dev_priv = dev->dev_private;
++	int i;
++
++	drm_modeset_lock_all(dev);
++	for (i = 0; i < dev_priv->num_shared_dpll; i++) {
++		struct intel_shared_dpll *pll = &dev_priv->shared_dplls[i];
++
++		seq_printf(m, "DPLL%i: %s, id: %i\n", i, pll->name, pll->id);
++		seq_printf(m, " crtc_mask: 0x%08x, active: %d, on: %s\n",
++			   pll->config.crtc_mask, pll->active, yesno(pll->on));
++		seq_printf(m, " tracked hardware state:\n");
++		seq_printf(m, " dpll:    0x%08x\n", pll->config.hw_state.dpll);
++		seq_printf(m, " dpll_md: 0x%08x\n",
++			   pll->config.hw_state.dpll_md);
++		seq_printf(m, " fp0:     0x%08x\n", pll->config.hw_state.fp0);
++		seq_printf(m, " fp1:     0x%08x\n", pll->config.hw_state.fp1);
++		seq_printf(m, " wrpll:   0x%08x\n", pll->config.hw_state.wrpll);
++	}
++	drm_modeset_unlock_all(dev);
++
++	return 0;
++}
++
++static int i915_wa_registers(struct seq_file *m, void *unused)
++{
++	int i;
++	int ret;
++	struct drm_info_node *node = (struct drm_info_node *) m->private;
++	struct drm_device *dev = node->minor->dev;
++	struct drm_i915_private *dev_priv = dev->dev_private;
++
++	ret = mutex_lock_interruptible(&dev->struct_mutex);
++	if (ret)
++		return ret;
++
++	intel_runtime_pm_get(dev_priv);
++
++	seq_printf(m, "Workarounds applied: %d\n", dev_priv->workarounds.count);
++	for (i = 0; i < dev_priv->workarounds.count; ++i) {
++		u32 addr, mask, value, read;
++		bool ok;
++
++		addr = dev_priv->workarounds.reg[i].addr;
++		mask = dev_priv->workarounds.reg[i].mask;
++		value = dev_priv->workarounds.reg[i].value;
++		read = I915_READ(addr);
++		ok = (value & mask) == (read & mask);
++		seq_printf(m, "0x%X: 0x%08X, mask: 0x%08X, read: 0x%08x, status: %s\n",
++			   addr, value, mask, read, ok ? "OK" : "FAIL");
++	}
++
++	intel_runtime_pm_put(dev_priv);
++	mutex_unlock(&dev->struct_mutex);
++
++	return 0;
++}
++
++static int i915_ddb_info(struct seq_file *m, void *unused)
++{
++	struct drm_info_node *node = m->private;
++	struct drm_device *dev = node->minor->dev;
++	struct drm_i915_private *dev_priv = dev->dev_private;
++	struct skl_ddb_allocation *ddb;
++	struct skl_ddb_entry *entry;
++	enum pipe pipe;
++	int plane;
++
++	if (INTEL_INFO(dev)->gen < 9)
++		return 0;
++
++	drm_modeset_lock_all(dev);
++
++	ddb = &dev_priv->wm.skl_hw.ddb;
++
++	seq_printf(m, "%-15s%8s%8s%8s\n", "", "Start", "End", "Size");
++
++	for_each_pipe(dev_priv, pipe) {
++		seq_printf(m, "Pipe %c\n", pipe_name(pipe));
++
++		for_each_plane(dev_priv, pipe, plane) {
++			entry = &ddb->plane[pipe][plane];
++			seq_printf(m, "  Plane%-8d%8u%8u%8u\n", plane + 1,
++				   entry->start, entry->end,
++				   skl_ddb_entry_size(entry));
++		}
++
++		entry = &ddb->plane[pipe][PLANE_CURSOR];
++		seq_printf(m, "  %-13s%8u%8u%8u\n", "Cursor", entry->start,
++			   entry->end, skl_ddb_entry_size(entry));
++	}
++
++	drm_modeset_unlock_all(dev);
++
++	return 0;
++}
++
++static void drrs_status_per_crtc(struct seq_file *m,
++		struct drm_device *dev, struct intel_crtc *intel_crtc)
++{
++	struct intel_encoder *intel_encoder;
++	struct drm_i915_private *dev_priv = dev->dev_private;
++	struct i915_drrs *drrs = &dev_priv->drrs;
++	int vrefresh = 0;
++
++	for_each_encoder_on_crtc(dev, &intel_crtc->base, intel_encoder) {
++		/* Encoder connected on this CRTC */
++		switch (intel_encoder->type) {
++		case INTEL_OUTPUT_EDP:
++			seq_puts(m, "eDP:\n");
++			break;
++		case INTEL_OUTPUT_DSI:
++			seq_puts(m, "DSI:\n");
++			break;
++		case INTEL_OUTPUT_HDMI:
++			seq_puts(m, "HDMI:\n");
++			break;
++		case INTEL_OUTPUT_DISPLAYPORT:
++			seq_puts(m, "DP:\n");
++			break;
++		default:
++			seq_printf(m, "Other encoder (id=%d).\n",
++						intel_encoder->type);
++			return;
++		}
++	}
++
++	if (dev_priv->vbt.drrs_type == STATIC_DRRS_SUPPORT)
++		seq_puts(m, "\tVBT: DRRS_type: Static");
++	else if (dev_priv->vbt.drrs_type == SEAMLESS_DRRS_SUPPORT)
++		seq_puts(m, "\tVBT: DRRS_type: Seamless");
++	else if (dev_priv->vbt.drrs_type == DRRS_NOT_SUPPORTED)
++		seq_puts(m, "\tVBT: DRRS_type: None");
++	else
++		seq_puts(m, "\tVBT: DRRS_type: FIXME: Unrecognized Value");
++
++	seq_puts(m, "\n\n");
++
++	if (to_intel_crtc_state(intel_crtc->base.state)->has_drrs) {
++		struct intel_panel *panel;
++
++		mutex_lock(&drrs->mutex);
++		/* DRRS Supported */
++		seq_puts(m, "\tDRRS Supported: Yes\n");
++
++		/* disable_drrs() will make drrs->dp NULL */
++		if (!drrs->dp) {
++			seq_puts(m, "Idleness DRRS: Disabled");
++			mutex_unlock(&drrs->mutex);
++			return;
++		}
++
++		panel = &drrs->dp->attached_connector->panel;
++		seq_printf(m, "\t\tBusy_frontbuffer_bits: 0x%X",
++					drrs->busy_frontbuffer_bits);
++
++		seq_puts(m, "\n\t\t");
++		if (drrs->refresh_rate_type == DRRS_HIGH_RR) {
++			seq_puts(m, "DRRS_State: DRRS_HIGH_RR\n");
++			vrefresh = panel->fixed_mode->vrefresh;
++		} else if (drrs->refresh_rate_type == DRRS_LOW_RR) {
++			seq_puts(m, "DRRS_State: DRRS_LOW_RR\n");
++			vrefresh = panel->downclock_mode->vrefresh;
++		} else {
++			seq_printf(m, "DRRS_State: Unknown(%d)\n",
++						drrs->refresh_rate_type);
++			mutex_unlock(&drrs->mutex);
++			return;
++		}
++		seq_printf(m, "\t\tVrefresh: %d", vrefresh);
++
++		seq_puts(m, "\n\t\t");
++		mutex_unlock(&drrs->mutex);
++	} else {
++		/* DRRS not supported. Print the VBT parameter*/
++		seq_puts(m, "\tDRRS Supported : No");
++	}
++	seq_puts(m, "\n");
++}
++
++static int i915_drrs_status(struct seq_file *m, void *unused)
++{
++	struct drm_info_node *node = m->private;
++	struct drm_device *dev = node->minor->dev;
++	struct intel_crtc *intel_crtc;
++	int active_crtc_cnt = 0;
++
++	for_each_intel_crtc(dev, intel_crtc) {
++		drm_modeset_lock(&intel_crtc->base.mutex, NULL);
++
++		if (intel_crtc->base.state->active) {
++			active_crtc_cnt++;
++			seq_printf(m, "\nCRTC %d:  ", active_crtc_cnt);
++
++			drrs_status_per_crtc(m, dev, intel_crtc);
++		}
++
++		drm_modeset_unlock(&intel_crtc->base.mutex);
++	}
++
++	if (!active_crtc_cnt)
++		seq_puts(m, "No active crtc found\n");
++
++	return 0;
++}
++
+ struct pipe_crc_info {
+ 	const char *name;
+ 	struct drm_device *dev;
+ 	enum pipe pipe;
+ };
+ 
++static int i915_dp_mst_info(struct seq_file *m, void *unused)
++{
++	struct drm_info_node *node = (struct drm_info_node *) m->private;
++	struct drm_device *dev = node->minor->dev;
++	struct drm_encoder *encoder;
++	struct intel_encoder *intel_encoder;
++	struct intel_digital_port *intel_dig_port;
++	drm_modeset_lock_all(dev);
++	list_for_each_entry(encoder, &dev->mode_config.encoder_list, head) {
++		intel_encoder = to_intel_encoder(encoder);
++		if (intel_encoder->type != INTEL_OUTPUT_DISPLAYPORT)
++			continue;
++		intel_dig_port = enc_to_dig_port(encoder);
++		if (!intel_dig_port->dp.can_mst)
++			continue;
++
++		drm_dp_mst_dump_topology(m, &intel_dig_port->dp.mst_mgr);
++	}
++	drm_modeset_unlock_all(dev);
++	return 0;
++}
++
+ static int i915_pipe_crc_open(struct inode *inode, struct file *filep)
+ {
+ 	struct pipe_crc_info *info = inode->i_private;

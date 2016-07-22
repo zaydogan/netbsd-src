@@ -1,0 +1,120 @@
+--- nouveau/nouveau_ttm.c	2016-07-22 15:48:08.000000000 +0900
++++ nouveau/nouveau_ttm.c	2016-07-12 01:31:24.000000000 +0900
+@@ -106,38 +109,11 @@ nouveau_vram_manager_new(struct ttm_mem_
+ 	return 0;
+ }
+ 
+-static void
+-nouveau_vram_manager_debug(struct ttm_mem_type_manager *man, const char *prefix)
+-{
+-	struct nouveau_fb *pfb = man->priv;
+-	struct nouveau_mm *mm = &pfb->vram;
+-	struct nouveau_mm_node *r;
+-	u32 total = 0, free = 0;
+-
+-	mutex_lock(&nv_subdev(pfb)->mutex);
+-	list_for_each_entry(r, &mm->nodes, nl_entry) {
+-		printk(KERN_DEBUG "%s %d: 0x%010llx 0x%010llx\n",
+-		       prefix, r->type, ((u64)r->offset << 12),
+-		       (((u64)r->offset + r->length) << 12));
+-
+-		total += r->length;
+-		if (!r->type)
+-			free += r->length;
+-	}
+-	mutex_unlock(&nv_subdev(pfb)->mutex);
+-
+-	printk(KERN_DEBUG "%s  total: 0x%010llx free: 0x%010llx\n",
+-	       prefix, (u64)total << 12, (u64)free << 12);
+-	printk(KERN_DEBUG "%s  block: 0x%08x\n",
+-	       prefix, mm->block_size << 12);
+-}
+-
+ const struct ttm_mem_type_manager_func nouveau_vram_manager = {
+ 	nouveau_vram_manager_init,
+ 	nouveau_vram_manager_fini,
+ 	nouveau_vram_manager_new,
+ 	nouveau_vram_manager_del,
+-	nouveau_vram_manager_debug
+ };
+ 
+ static int
+@@ -365,27 +350,46 @@ nouveau_ttm_global_release(struct nouvea
+ int
+ nouveau_ttm_init(struct nouveau_drm *drm)
+ {
++	struct nvkm_device *device = nvxx_device(&drm->device);
++	struct nvkm_pci *pci = device->pci;
+ 	struct drm_device *dev = drm->dev;
+-	struct nouveau_device *device = nv_device(drm->device);
+-	u32 bits;
++	u8 bits;
+ 	int ret;
+ 
+-	bits = nouveau_vmmgr(drm->device)->dma_bits;
+-	if (nv_device_is_pci(device)) {
+-		if (drm->agp.stat == ENABLED ||
+-		     !pci_dma_supported(dev->pdev, DMA_BIT_MASK(bits)))
++	if (pci && pci->agp.bridge) {
++		drm->agp.bridge = pci->agp.bridge;
++		drm->agp.base = pci->agp.base;
++		drm->agp.size = pci->agp.size;
++		drm->agp.cma = pci->agp.cma;
++	}
++
++	bits = nvxx_mmu(&drm->device)->dma_bits;
++	if (nvxx_device(&drm->device)->func->pci) {
++		if (drm->agp.bridge)
+ 			bits = 32;
++	} else if (device->func->tegra) {
++		struct nvkm_device_tegra *tegra = device->func->tegra(device);
++
++		/*
++		 * If the platform can use a IOMMU, then the addressable DMA
++		 * space is constrained by the IOMMU bit
++		 */
++		if (tegra->func->iommu_bit)
++			bits = min(bits, tegra->func->iommu_bit);
++
++	}
+ 
+-		ret = pci_set_dma_mask(dev->pdev, DMA_BIT_MASK(bits));
+-		if (ret)
+-			return ret;
+-
+-		ret = pci_set_consistent_dma_mask(dev->pdev,
+-						  DMA_BIT_MASK(bits));
+-		if (ret)
+-			pci_set_consistent_dma_mask(dev->pdev,
+-						    DMA_BIT_MASK(32));
++	ret = dma_set_mask(dev->dev, DMA_BIT_MASK(bits));
++	if (ret && bits != 32) {
++		bits = 32;
++		ret = dma_set_mask(dev->dev, DMA_BIT_MASK(bits));
+ 	}
++	if (ret)
++		return ret;
++
++	ret = dma_set_coherent_mask(dev->dev, DMA_BIT_MASK(bits));
++	if (ret)
++		dma_set_coherent_mask(dev->dev, DMA_BIT_MASK(32));
+ 
+ 	ret = nouveau_ttm_global_init(drm);
+ 	if (ret)
+@@ -412,12 +415,12 @@ nouveau_ttm_init(struct nouveau_drm *drm
+ 		return ret;
+ 	}
+ 
+-	drm->ttm.mtrr = arch_phys_wc_add(nv_device_resource_start(device, 1),
+-					 nv_device_resource_len(device, 1));
++	drm->ttm.mtrr = arch_phys_wc_add(device->func->resource_addr(device, 1),
++					 device->func->resource_size(device, 1));
+ 
+ 	/* GART init */
+-	if (drm->agp.stat != ENABLED) {
+-		drm->gem.gart_available = nouveau_vmmgr(drm->device)->limit;
++	if (!drm->agp.bridge) {
++		drm->gem.gart_available = nvxx_mmu(&drm->device)->limit;
+ 	} else {
+ 		drm->gem.gart_available = drm->agp.size;
+ 	}

@@ -1,0 +1,32 @@
+--- radeon/evergreen_hdmi.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/evergreen_hdmi.c	2016-07-12 01:31:24.000000000 +0900
+@@ -198,25 +191,17 @@ static void evergreen_hdmi_write_sad_reg
+ 
+ 		value |= SUPPORTED_FREQUENCIES_STEREO(stereo_freqs);
+ 
+-		WREG32(eld_reg_to_type[i][0], value);
++		WREG32_ENDPOINT(0, eld_reg_to_type[i][0], value);
+ 	}
+-
+-	kfree(sads);
+ }
+ 
+ /*
+- * build a HDMI Video Info Frame
++ * build a AVI Info Frame
+  */
+-static void evergreen_hdmi_update_avi_infoframe(struct drm_encoder *encoder,
+-						void *buffer, size_t size)
++void evergreen_set_avi_packet(struct radeon_device *rdev, u32 offset,
++    unsigned char *buffer, size_t size)
+ {
+-	struct drm_device *dev = encoder->dev;
+-	struct radeon_device *rdev = dev->dev_private;
+-	struct radeon_encoder *radeon_encoder = to_radeon_encoder(encoder);
+-	struct radeon_encoder_atom_dig *dig = radeon_encoder->enc_priv;
+-	uint32_t offset = dig->afmt->offset;
+ 	uint8_t *frame = buffer + 3;
+-	uint8_t *header = buffer;
+ 
+ 	WREG32(AFMT_AVI_INFO0 + offset,
+ 		frame[0x0] | (frame[0x1] << 8) | (frame[0x2] << 16) | (frame[0x3] << 24));

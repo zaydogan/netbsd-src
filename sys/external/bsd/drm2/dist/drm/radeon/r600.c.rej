@@ -1,0 +1,86 @@
+--- radeon/r600.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/r600.c	2016-07-12 01:31:24.000000000 +0900
+@@ -4086,23 +4303,27 @@ restart_ih:
+ 		case 1: /* D1 vblank/vline */
+ 			switch (src_data) {
+ 			case 0: /* D1 vblank */
+-				if (rdev->irq.stat_regs.r600.disp_int & LB_D1_VBLANK_INTERRUPT) {
+-					if (rdev->irq.crtc_vblank_int[0]) {
+-						drm_handle_vblank(rdev->ddev, 0);
+-						rdev->pm.vblank_sync = true;
+-						wake_up(&rdev->irq.vblank_queue);
+-					}
+-					if (atomic_read(&rdev->irq.pflip[0]))
+-						radeon_crtc_handle_flip(rdev, 0);
+-					rdev->irq.stat_regs.r600.disp_int &= ~LB_D1_VBLANK_INTERRUPT;
+-					DRM_DEBUG("IH: D1 vblank\n");
++				if (!(rdev->irq.stat_regs.r600.disp_int & LB_D1_VBLANK_INTERRUPT))
++					DRM_DEBUG("IH: D1 vblank - IH event w/o asserted irq bit?\n");
++
++				if (rdev->irq.crtc_vblank_int[0]) {
++					drm_handle_vblank(rdev->ddev, 0);
++					rdev->pm.vblank_sync = true;
++					wake_up(&rdev->irq.vblank_queue);
+ 				}
++				if (atomic_read(&rdev->irq.pflip[0]))
++					radeon_crtc_handle_vblank(rdev, 0);
++				rdev->irq.stat_regs.r600.disp_int &= ~LB_D1_VBLANK_INTERRUPT;
++				DRM_DEBUG("IH: D1 vblank\n");
++
+ 				break;
+ 			case 1: /* D1 vline */
+-				if (rdev->irq.stat_regs.r600.disp_int & LB_D1_VLINE_INTERRUPT) {
+-					rdev->irq.stat_regs.r600.disp_int &= ~LB_D1_VLINE_INTERRUPT;
+-					DRM_DEBUG("IH: D1 vline\n");
+-				}
++				if (!(rdev->irq.stat_regs.r600.disp_int & LB_D1_VLINE_INTERRUPT))
++				    DRM_DEBUG("IH: D1 vline - IH event w/o asserted irq bit?\n");
++
++				rdev->irq.stat_regs.r600.disp_int &= ~LB_D1_VLINE_INTERRUPT;
++				DRM_DEBUG("IH: D1 vline\n");
++
+ 				break;
+ 			default:
+ 				DRM_DEBUG("Unhandled interrupt: %d %d\n", src_id, src_data);
+@@ -4112,23 +4333,27 @@ restart_ih:
+ 		case 5: /* D2 vblank/vline */
+ 			switch (src_data) {
+ 			case 0: /* D2 vblank */
+-				if (rdev->irq.stat_regs.r600.disp_int & LB_D2_VBLANK_INTERRUPT) {
+-					if (rdev->irq.crtc_vblank_int[1]) {
+-						drm_handle_vblank(rdev->ddev, 1);
+-						rdev->pm.vblank_sync = true;
+-						wake_up(&rdev->irq.vblank_queue);
+-					}
+-					if (atomic_read(&rdev->irq.pflip[1]))
+-						radeon_crtc_handle_flip(rdev, 1);
+-					rdev->irq.stat_regs.r600.disp_int &= ~LB_D2_VBLANK_INTERRUPT;
+-					DRM_DEBUG("IH: D2 vblank\n");
++				if (!(rdev->irq.stat_regs.r600.disp_int & LB_D2_VBLANK_INTERRUPT))
++					DRM_DEBUG("IH: D2 vblank - IH event w/o asserted irq bit?\n");
++
++				if (rdev->irq.crtc_vblank_int[1]) {
++					drm_handle_vblank(rdev->ddev, 1);
++					rdev->pm.vblank_sync = true;
++					wake_up(&rdev->irq.vblank_queue);
+ 				}
++				if (atomic_read(&rdev->irq.pflip[1]))
++					radeon_crtc_handle_vblank(rdev, 1);
++				rdev->irq.stat_regs.r600.disp_int &= ~LB_D2_VBLANK_INTERRUPT;
++				DRM_DEBUG("IH: D2 vblank\n");
++
+ 				break;
+ 			case 1: /* D1 vline */
+-				if (rdev->irq.stat_regs.r600.disp_int & LB_D2_VLINE_INTERRUPT) {
+-					rdev->irq.stat_regs.r600.disp_int &= ~LB_D2_VLINE_INTERRUPT;
+-					DRM_DEBUG("IH: D2 vline\n");
+-				}
++				if (!(rdev->irq.stat_regs.r600.disp_int & LB_D2_VLINE_INTERRUPT))
++					DRM_DEBUG("IH: D2 vline - IH event w/o asserted irq bit?\n");
++
++				rdev->irq.stat_regs.r600.disp_int &= ~LB_D2_VLINE_INTERRUPT;
++				DRM_DEBUG("IH: D2 vline\n");
++
+ 				break;
+ 			default:
+ 				DRM_DEBUG("Unhandled interrupt: %d %d\n", src_id, src_data);

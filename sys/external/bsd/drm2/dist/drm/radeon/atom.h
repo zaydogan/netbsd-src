@@ -145,6 +145,7 @@ extern int atom_debug;
 
 struct atom_context *atom_parse(struct card_info *, void *);
 int atom_execute_table(struct atom_context *, int, uint32_t *);
+int atom_execute_table_scratch_unlocked(struct atom_context *, int, uint32_t *);
 int atom_asic_init(struct atom_context *);
 void atom_destroy(struct atom_context *);
 bool atom_parse_data_header(struct atom_context *ctx, int index, uint16_t *size,

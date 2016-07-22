@@ -1,0 +1,103 @@
+--- drm_pci.c	2016-07-22 15:48:07.000000000 +0900
++++ drm_pci.c	2016-07-12 01:31:24.000000000 +0900
+@@ -129,69 +121,29 @@ static int drm_get_pci_domain(struct drm
+ 	return pci_domain_nr(dev->pdev->bus);
+ }
+ 
+-static int drm_pci_get_irq(struct drm_device *dev)
+-{
+-	return dev->pdev->irq;
+-}
+-
+-static const char *drm_pci_get_name(struct drm_device *dev)
+-{
+-	struct pci_driver *pdriver = dev->driver->kdriver.pci;
+-	return pdriver->name;
+-}
+-
+-static int drm_pci_set_busid(struct drm_device *dev, struct drm_master *master)
++int drm_pci_set_busid(struct drm_device *dev, struct drm_master *master)
+ {
+-	int len, ret;
+-	struct pci_driver *pdriver = dev->driver->kdriver.pci;
+-	master->unique_len = 40;
+-	master->unique_size = master->unique_len;
+-	master->unique = kmalloc(master->unique_size, GFP_KERNEL);
+-	if (master->unique == NULL)
++	master->unique = kasprintf(GFP_KERNEL, "pci:%04x:%02x:%02x.%d",
++					drm_get_pci_domain(dev),
++					dev->pdev->bus->number,
++					PCI_SLOT(dev->pdev->devfn),
++					PCI_FUNC(dev->pdev->devfn));
++	if (!master->unique)
+ 		return -ENOMEM;
+ 
+-
+-	len = snprintf(master->unique, master->unique_len,
+-		       "pci:%04x:%02x:%02x.%d",
+-		       drm_get_pci_domain(dev),
+-		       dev->pdev->bus->number,
+-		       PCI_SLOT(dev->pdev->devfn),
+-		       PCI_FUNC(dev->pdev->devfn));
+-
+-	if (len >= master->unique_len) {
+-		DRM_ERROR("buffer overflow");
+-		ret = -EINVAL;
+-		goto err;
+-	} else
+-		master->unique_len = len;
+-
+-	dev->devname =
+-		kmalloc(strlen(pdriver->name) +
+-			master->unique_len + 2, GFP_KERNEL);
+-
+-	if (dev->devname == NULL) {
+-		ret = -ENOMEM;
+-		goto err;
+-	}
+-
+-	sprintf(dev->devname, "%s@%s", pdriver->name,
+-		master->unique);
+-
++	master->unique_len = strlen(master->unique);
+ 	return 0;
+-err:
+-	return ret;
+ }
++EXPORT_SYMBOL(drm_pci_set_busid);
+ 
+-static int drm_pci_set_unique(struct drm_device *dev,
+-			      struct drm_master *master,
+-			      struct drm_unique *u)
++int drm_pci_set_unique(struct drm_device *dev,
++		       struct drm_master *master,
++		       struct drm_unique *u)
+ {
+ 	int domain, bus, slot, func, ret;
+-	const char *bus_name;
+ 
+ 	master->unique_len = u->unique_len;
+-	master->unique_size = u->unique_len + 1;
+-	master->unique = kmalloc(master->unique_size, GFP_KERNEL);
++	master->unique = kmalloc(master->unique_len + 1, GFP_KERNEL);
+ 	if (!master->unique) {
+ 		ret = -ENOMEM;
+ 		goto err;
+@@ -204,17 +156,6 @@ static int drm_pci_set_unique(struct drm
+ 
+ 	master->unique[master->unique_len] = '\0';
+ 
+-	bus_name = dev->driver->bus->get_name(dev);
+-	dev->devname = kmalloc(strlen(bus_name) +
+-			       strlen(master->unique) + 2, GFP_KERNEL);
+-	if (!dev->devname) {
+-		ret = -ENOMEM;
+-		goto err;
+-	}
+-
+-	sprintf(dev->devname, "%s@%s", bus_name,
+-		master->unique);
+-
+ 	/* Return error if the busid submitted doesn't match the device's actual
+ 	 * busid.
+ 	 */

@@ -1,0 +1,56 @@
+--- radeon/kv_dpm.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/kv_dpm.c	2016-07-12 01:31:24.000000000 +0900
+@@ -1456,14 +1474,14 @@ static int kv_update_uvd_dpm(struct rade
+ 	return kv_enable_uvd_dpm(rdev, !gate);
+ }
+ 
+-static u8 kv_get_vce_boot_level(struct radeon_device *rdev)
++static u8 kv_get_vce_boot_level(struct radeon_device *rdev, u32 evclk)
+ {
+ 	u8 i;
+ 	struct radeon_vce_clock_voltage_dependency_table *table =
+ 		&rdev->pm.dpm.dyn_state.vce_clock_voltage_dependency_table;
+ 
+ 	for (i = 0; i < table->count; i++) {
+-		if (table->entries[i].evclk >= 0) /* XXX */
++		if (table->entries[i].evclk >= evclk)
+ 			break;
+ 	}
+ 
+@@ -2813,11 +2856,36 @@ void kv_dpm_debugfs_print_current_perfor
+ 		tmp = (RREG32_SMC(SMU_VOLTAGE_STATUS) & SMU_VOLTAGE_CURRENT_LEVEL_MASK) >>
+ 			SMU_VOLTAGE_CURRENT_LEVEL_SHIFT;
+ 		vddc = kv_convert_8bit_index_to_voltage(rdev, (u16)tmp);
++		seq_printf(m, "uvd    %sabled\n", pi->uvd_power_gated ? "dis" : "en");
++		seq_printf(m, "vce    %sabled\n", pi->vce_power_gated ? "dis" : "en");
+ 		seq_printf(m, "power level %d    sclk: %u vddc: %u\n",
+ 			   current_index, sclk, vddc);
+ 	}
+ }
+ 
++u32 kv_dpm_get_current_sclk(struct radeon_device *rdev)
++{
++	struct kv_power_info *pi = kv_get_pi(rdev);
++	u32 current_index =
++		(RREG32_SMC(TARGET_AND_CURRENT_PROFILE_INDEX) & CURR_SCLK_INDEX_MASK) >>
++		CURR_SCLK_INDEX_SHIFT;
++	u32 sclk;
++
++	if (current_index >= SMU__NUM_SCLK_DPM_STATE) {
++		return 0;
++	} else {
++		sclk = be32_to_cpu(pi->graphics_level[current_index].SclkFrequency);
++		return sclk;
++	}
++}
++
++u32 kv_dpm_get_current_mclk(struct radeon_device *rdev)
++{
++	struct kv_power_info *pi = kv_get_pi(rdev);
++
++	return pi->sys_info.bootup_uma_clk;
++}
++
+ void kv_dpm_print_power_state(struct radeon_device *rdev,
+ 			      struct radeon_ps *rps)
+ {

@@ -1,0 +1,22 @@
+--- radeon/radeon_object.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/radeon_object.c	2016-07-12 01:31:24.000000000 +0900
+@@ -579,13 +671,13 @@ int radeon_bo_list_validate(struct radeo
+ 		lobj->gpu_offset = radeon_bo_gpu_offset(bo);
+ 		lobj->tiling_flags = bo->tiling_flags;
+ 	}
+-	return 0;
+-}
+ 
+-int radeon_bo_fbdev_mmap(struct radeon_bo *bo,
+-			     struct vm_area_struct *vma)
+-{
+-	return ttm_fbdev_mmap(vma, &bo->tbo);
++	list_for_each_entry(lobj, &duplicates, tv.head) {
++		lobj->gpu_offset = radeon_bo_gpu_offset(lobj->robj);
++		lobj->tiling_flags = lobj->robj->tiling_flags;
++	}
++
++	return 0;
+ }
+ 
+ int radeon_bo_get_surface_reg(struct radeon_bo *bo)

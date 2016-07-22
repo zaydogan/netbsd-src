@@ -1,17 +1,12 @@
-/**
- * \file drm_auth.c
- * IOCTLs for authentication
- *
- * \author Rickard E. (Rik) Faith <faith@valinux.com>
- * \author Gareth Hughes <gareth@valinux.com>
- */
-
 /*
  * Created: Tue Feb  2 08:37:54 1999 by faith@valinux.com
  *
  * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
+ *
+ * Author Rickard E. (Rik) Faith <faith@valinux.com>
+ * Author Gareth Hughes <gareth@valinux.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -180,10 +175,14 @@ int drm_authmagic(struct drm_device *dev, void *data,
 	struct drm_file *file;
 
 	DRM_DEBUG("%u\n", auth->magic);
-	if ((file = drm_find_file(file_priv->master, auth->magic))) {
+
+	mutex_lock(&dev->struct_mutex);
+	file = idr_find(&file_priv->master->magic_map, auth->magic);
+	if (file) {
 		file->authenticated = 1;
-		drm_remove_magic(file_priv->master, auth->magic);
-		return 0;
+		idr_replace(&file_priv->master->magic_map, NULL, auth->magic);
 	}
-	return -EINVAL;
+	mutex_unlock(&dev->struct_mutex);
+
+	return file ? 0 : -EINVAL;
 }

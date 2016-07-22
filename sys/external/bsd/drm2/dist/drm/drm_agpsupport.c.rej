@@ -1,0 +1,8 @@
+--- drm_agpsupport.c	2016-07-22 15:48:07.000000000 +0900
++++ drm_agpsupport.c	2016-07-12 01:31:24.000000000 +0900
+@@ -500,5 +499,3 @@ drm_agp_bind_pages(struct drm_device *de
+ 	return mem;
+ }
+ EXPORT_SYMBOL(drm_agp_bind_pages);
+-
+-#endif /* __OS_HAS_AGP */

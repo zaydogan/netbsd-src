@@ -1,0 +1,181 @@
+--- i915/i915_gem_execbuffer.c	2016-07-22 15:48:07.000000000 +0900
++++ i915/i915_gem_execbuffer.c	2016-07-12 01:31:24.000000000 +0900
+@@ -32,9 +32,11 @@
+ #include "i915_trace.h"
+ #include "intel_drv.h"
+ #include <linux/dma_remapping.h>
++#include <linux/uaccess.h>
+ 
+ #define  __EXEC_OBJECT_HAS_PIN (1<<31)
+ #define  __EXEC_OBJECT_HAS_FENCE (1<<30)
++#define  __EXEC_OBJECT_NEEDS_MAP (1<<29)
+ #define  __EXEC_OBJECT_NEEDS_BIAS (1<<28)
+ 
+ #define BATCH_OFFSET_BIAS (256*1024)
+@@ -244,16 +231,17 @@ static inline int use_cpu_reloc(struct d
+ {
+ 	return (HAS_LLC(obj->base.dev) ||
+ 		obj->base.write_domain == I915_GEM_DOMAIN_CPU ||
+-		!obj->map_and_fenceable ||
+ 		obj->cache_level != I915_CACHE_NONE);
+ }
+ 
+ static int
+ relocate_entry_cpu(struct drm_i915_gem_object *obj,
+-		   struct drm_i915_gem_relocation_entry *reloc)
++		   struct drm_i915_gem_relocation_entry *reloc,
++		   uint64_t target_offset)
+ {
+ 	struct drm_device *dev = obj->base.dev;
+ 	uint32_t page_offset = offset_in_page(reloc->offset);
++	uint64_t delta = reloc->delta + target_offset;
+ 	char *vaddr;
+ 	int ret;
+ 
+@@ -303,25 +293,24 @@ relocate_entry_gtt(struct drm_i915_gem_o
+ 		return ret;
+ 
+ 	/* Map the page containing the relocation we're going to perform.  */
+-	reloc->offset += i915_gem_obj_ggtt_offset(obj);
++	offset = i915_gem_obj_ggtt_offset(obj);
++	offset += reloc->offset;
+ 	reloc_page = io_mapping_map_atomic_wc(dev_priv->gtt.mappable,
+-			reloc->offset & PAGE_MASK);
+-	reloc_entry = (uint32_t __iomem *)
+-		(reloc_page + offset_in_page(reloc->offset));
+-	iowrite32(reloc->delta, reloc_entry);
++					      offset & PAGE_MASK);
++	iowrite32(lower_32_bits(delta), reloc_page + offset_in_page(offset));
+ 
+ 	if (INTEL_INFO(dev)->gen >= 8) {
+-		reloc_entry += 1;
++		offset += sizeof(uint32_t);
+ 
+-		if (offset_in_page(reloc->offset + sizeof(uint32_t)) == 0) {
++		if (offset_in_page(offset) == 0) {
+ 			io_mapping_unmap_atomic(reloc_page);
+-			reloc_page = io_mapping_map_atomic_wc(
+-					dev_priv->gtt.mappable,
+-					reloc->offset + sizeof(uint32_t));
+-			reloc_entry = reloc_page;
++			reloc_page =
++				io_mapping_map_atomic_wc(dev_priv->gtt.mappable,
++							 offset);
+ 		}
+ 
+-		iowrite32(0, reloc_entry);
++		iowrite32(upper_32_bits(delta),
++			  reloc_page + offset_in_page(offset));
+ 	}
+ 
+ 	io_mapping_unmap_atomic(reloc_page);
+@@ -457,14 +490,19 @@ i915_gem_execbuffer_relocate_entry(struc
+ 	}
+ 
+ 	/* We can't wait for rendering with pagefaults disabled */
+-	if (obj->active && in_atomic())
++	if (obj->active && pagefault_disabled())
+ 		return -EFAULT;
+ 
+-	reloc->delta += target_offset;
+ 	if (use_cpu_reloc(obj))
+-		ret = relocate_entry_cpu(obj, reloc);
+-	else
+-		ret = relocate_entry_gtt(obj, reloc);
++		ret = relocate_entry_cpu(obj, reloc, target_offset);
++	else if (obj->map_and_fenceable)
++		ret = relocate_entry_gtt(obj, reloc, target_offset);
++	else if (cpu_has_clflush)
++		ret = relocate_entry_clflush(obj, reloc, target_offset);
++	else {
++		WARN_ONCE(1, "Impossible case in relocation handling\n");
++		ret = -ENODEV;
++	}
+ 
+ 	if (ret)
+ 		return ret;
+@@ -1324,42 +1609,72 @@ i915_gem_do_execbuffer(struct drm_device
+ 	struct drm_i915_private *dev_priv = dev->dev_private;
+ 	struct eb_vmas *eb;
+ 	struct drm_i915_gem_object *batch_obj;
+-	struct drm_clip_rect *cliprects = NULL;
+-	struct intel_ring_buffer *ring;
+-	struct i915_hw_context *ctx;
++	struct drm_i915_gem_exec_object2 shadow_exec_entry;
++	struct intel_engine_cs *ring;
++	struct intel_context *ctx;
+ 	struct i915_address_space *vm;
++	struct i915_execbuffer_params params_master; /* XXX: will be removed later */
++	struct i915_execbuffer_params *params = &params_master;
+ 	const u32 ctx_id = i915_execbuffer2_get_context_id(*args);
+-	u32 exec_start = args->batch_start_offset, exec_len;
+-	u32 mask, flags;
+-	int ret, mode, i;
++	u32 dispatch_flags;
++	int ret;
+ 	bool need_relocs;
+ 
+ 	if (!i915_gem_check_execbuffer(args))
+ 		return -EINVAL;
+ 
+-	ret = validate_exec_list(exec, args->buffer_count);
++	ret = validate_exec_list(dev, exec, args->buffer_count);
+ 	if (ret)
+ 		return ret;
+ 
+-	flags = 0;
++	dispatch_flags = 0;
+ 	if (args->flags & I915_EXEC_SECURE) {
+ 		if (!file->is_master || !capable(CAP_SYS_ADMIN))
+ 		    return -EPERM;
+ 
+-		flags |= I915_DISPATCH_SECURE;
++		dispatch_flags |= I915_DISPATCH_SECURE;
+ 	}
+ 	if (args->flags & I915_EXEC_IS_PINNED)
+-		flags |= I915_DISPATCH_PINNED;
++		dispatch_flags |= I915_DISPATCH_PINNED;
+ 
+-	if ((args->flags & I915_EXEC_RING_MASK) > I915_NUM_RINGS) {
++	if ((args->flags & I915_EXEC_RING_MASK) > LAST_USER_RING) {
+ 		DRM_DEBUG("execbuf with unknown ring: %d\n",
+ 			  (int)(args->flags & I915_EXEC_RING_MASK));
+ 		return -EINVAL;
+ 	}
+ 
++	if (((args->flags & I915_EXEC_RING_MASK) != I915_EXEC_BSD) &&
++	    ((args->flags & I915_EXEC_BSD_MASK) != 0)) {
++		DRM_DEBUG("execbuf with non bsd ring but with invalid "
++			"bsd dispatch flags: %d\n", (int)(args->flags));
++		return -EINVAL;
++	} 
++
+ 	if ((args->flags & I915_EXEC_RING_MASK) == I915_EXEC_DEFAULT)
+ 		ring = &dev_priv->ring[RCS];
+-	else
++	else if ((args->flags & I915_EXEC_RING_MASK) == I915_EXEC_BSD) {
++		if (HAS_BSD2(dev)) {
++			int ring_id;
++
++			switch (args->flags & I915_EXEC_BSD_MASK) {
++			case I915_EXEC_BSD_DEFAULT:
++				ring_id = gen8_dispatch_bsd_ring(dev, file);
++				ring = &dev_priv->ring[ring_id];
++				break;
++			case I915_EXEC_BSD_RING1:
++				ring = &dev_priv->ring[VCS];
++				break;
++			case I915_EXEC_BSD_RING2:
++				ring = &dev_priv->ring[VCS2];
++				break;
++			default:
++				DRM_DEBUG("execbuf with unknown bsd ring: %d\n",
++					  (int)(args->flags & I915_EXEC_BSD_MASK));
++				return -EINVAL;
++			}
++		} else
++			ring = &dev_priv->ring[VCS];
++	} else
+ 		ring = &dev_priv->ring[(args->flags & I915_EXEC_RING_MASK) - 1];
+ 
+ 	if (!intel_ring_initialized(ring)) {

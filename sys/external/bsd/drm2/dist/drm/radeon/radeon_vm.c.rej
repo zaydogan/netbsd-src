@@ -1,0 +1,32 @@
+--- radeon/radeon_vm.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/radeon_vm.c	2016-07-12 01:31:24.000000000 +0900
+@@ -1172,15 +1452,23 @@ void radeon_vm_bo_invalidate(struct rade
+  */
+ int radeon_vm_init(struct radeon_device *rdev, struct radeon_vm *vm)
+ {
++	const unsigned align = min(RADEON_VM_PTB_ALIGN_SIZE,
++		RADEON_VM_PTE_COUNT * 8);
+ 	unsigned pd_size, pd_entries, pts_size;
+-	int r;
++	int i, r;
+ 
+-	vm->id = 0;
+-	vm->fence = NULL;
+-	vm->last_flush = NULL;
+-	vm->last_id_use = NULL;
++	vm->ib_bo_va = NULL;
++	for (i = 0; i < RADEON_NUM_RINGS; ++i) {
++		vm->ids[i].id = 0;
++		vm->ids[i].flushed_updates = NULL;
++		vm->ids[i].last_id_use = NULL;
++	}
+ 	mutex_init(&vm->mutex);
+-	INIT_LIST_HEAD(&vm->va);
++	vm->va = RB_ROOT;
++	spin_lock_init(&vm->status_lock);
++	INIT_LIST_HEAD(&vm->invalidated);
++	INIT_LIST_HEAD(&vm->freed);
++	INIT_LIST_HEAD(&vm->cleared);
+ 
+ 	pd_size = radeon_vm_directory_size(rdev);
+ 	pd_entries = radeon_vm_num_pdes(rdev);

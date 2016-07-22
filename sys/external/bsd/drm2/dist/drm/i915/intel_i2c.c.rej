@@ -1,0 +1,42 @@
+--- i915/intel_i2c.c	2016-07-22 15:48:08.000000000 +0900
++++ i915/intel_i2c.c	2016-07-12 01:31:24.000000000 +0900
+@@ -270,13 +266,13 @@ gmbus_wait_hw_status(struct drm_i915_pri
+ 	/* Important: The hw handles only the first bit, so set only one! Since
+ 	 * we also need to check for NAKs besides the hw ready/idle signal, we
+ 	 * need to wake up periodically and check that ourselves. */
+-	I915_WRITE(GMBUS4 + reg_offset, gmbus4_irq_en);
++	I915_WRITE(GMBUS4, gmbus4_irq_en);
+ 
+ 	for (i = 0; i < msecs_to_jiffies_timeout(50); i++) {
+ 		prepare_to_wait(&dev_priv->gmbus_wait_queue, &wait,
+ 				TASK_UNINTERRUPTIBLE);
+ 
+-		gmbus2 = I915_READ_NOTRACE(GMBUS2 + reg_offset);
++		gmbus2 = I915_READ_NOTRACE(GMBUS2);
+ 		if (gmbus2 & (GMBUS_SATOER | gmbus2_status))
+ 			break;
+ 
+@@ -297,20 +293,19 @@ static int
+ gmbus_wait_idle(struct drm_i915_private *dev_priv)
+ {
+ 	int ret;
+-	int reg_offset = dev_priv->gpio_mmio_base;
+ 
+-#define C ((I915_READ_NOTRACE(GMBUS2 + reg_offset) & GMBUS_ACTIVE) == 0)
++#define C ((I915_READ_NOTRACE(GMBUS2) & GMBUS_ACTIVE) == 0)
+ 
+ 	if (!HAS_GMBUS_IRQ(dev_priv->dev))
+ 		return wait_for(C, 10);
+ 
+ 	/* Important: The hw handles only the first bit, so set only one! */
+-	I915_WRITE(GMBUS4 + reg_offset, GMBUS_IDLE_EN);
++	I915_WRITE(GMBUS4, GMBUS_IDLE_EN);
+ 
+ 	ret = wait_event_timeout(dev_priv->gmbus_wait_queue, C,
+ 				 msecs_to_jiffies_timeout(10));
+ 
+-	I915_WRITE(GMBUS4 + reg_offset, 0);
++	I915_WRITE(GMBUS4, 0);
+ 
+ 	if (ret)
+ 		return 0;

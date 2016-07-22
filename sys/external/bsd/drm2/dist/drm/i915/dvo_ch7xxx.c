@@ -160,7 +160,7 @@ static bool ch7xxx_readb(struct intel_dvo_device *dvo, int addr, uint8_t *ch)
 	if (i2c_transfer(adapter, msgs, 2) == 2) {
 		*ch = in_buf[0];
 		return true;
-	};
+	}
 
 	if (!ch7xxx->quiet) {
 		DRM_DEBUG_KMS("Unable to read register 0x%02x from %s:%02x.\n",
@@ -275,8 +275,8 @@ static enum drm_mode_status ch7xxx_mode_valid(struct intel_dvo_device *dvo,
 }
 
 static void ch7xxx_mode_set(struct intel_dvo_device *dvo,
-			    struct drm_display_mode *mode,
-			    struct drm_display_mode *adjusted_mode)
+			    const struct drm_display_mode *mode,
+			    const struct drm_display_mode *adjusted_mode)
 {
 	uint8_t tvco, tpcp, tpd, tlpf, idf;
 

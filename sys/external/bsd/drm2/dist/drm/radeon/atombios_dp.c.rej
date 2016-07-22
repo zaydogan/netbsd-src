@@ -1,0 +1,43 @@
+--- radeon/atombios_dp.c	2016-07-22 15:48:08.000000000 +0900
++++ radeon/atombios_dp.c	2016-07-12 01:31:24.000000000 +0900
+@@ -228,24 +249,34 @@ radeon_dp_aux_transfer(struct drm_dp_aux
+ 
+ void radeon_dp_aux_init(struct radeon_connector *radeon_connector)
+ {
++	struct drm_device *dev = radeon_connector->base.dev;
++	struct radeon_device *rdev = dev->dev_private;
+ 	int ret;
+ 
+ 	radeon_connector->ddc_bus->rec.hpd = radeon_connector->hpd.hpd;
+ 	radeon_connector->ddc_bus->aux.dev = radeon_connector->base.kdev;
+-	radeon_connector->ddc_bus->aux.transfer = radeon_dp_aux_transfer;
+-	ret = drm_dp_aux_register_i2c_bus(&radeon_connector->ddc_bus->aux);
++	if (ASIC_IS_DCE5(rdev)) {
++		if (radeon_auxch)
++			radeon_connector->ddc_bus->aux.transfer = radeon_dp_aux_transfer_native;
++		else
++			radeon_connector->ddc_bus->aux.transfer = radeon_dp_aux_transfer_atom;
++	} else {
++		radeon_connector->ddc_bus->aux.transfer = radeon_dp_aux_transfer_atom;
++	}
++
++	ret = drm_dp_aux_register(&radeon_connector->ddc_bus->aux);
+ 	if (!ret)
+ 		radeon_connector->ddc_bus->has_aux = true;
+ 
+-	WARN(ret, "drm_dp_aux_register_i2c_bus() failed with error %d\n", ret);
++	WARN(ret, "drm_dp_aux_register() failed with error %d\n", ret);
+ }
+ 
+ /***** general DP utility functions *****/
+ 
+-#define DP_VOLTAGE_MAX         DP_TRAIN_VOLTAGE_SWING_1200
+-#define DP_PRE_EMPHASIS_MAX    DP_TRAIN_PRE_EMPHASIS_9_5
++#define DP_VOLTAGE_MAX         DP_TRAIN_VOLTAGE_SWING_LEVEL_3
++#define DP_PRE_EMPHASIS_MAX    DP_TRAIN_PRE_EMPH_LEVEL_3
+ 
+-static void dp_get_adjust_train(u8 link_status[DP_LINK_STATUS_SIZE],
++static void dp_get_adjust_train(const u8 link_status[DP_LINK_STATUS_SIZE],
+ 				int lane_count,
+ 				u8 train_set[4])
+ {
