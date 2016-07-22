@@ -24,6 +24,18 @@
 #ifndef DRM_PLANE_HELPER_H
 #define DRM_PLANE_HELPER_H
 
+#include <drm/drm_rect.h>
+#include <drm/drm_crtc.h>
+
+/*
+ * Drivers that don't allow primary plane scaling may pass this macro in place
+ * of the min/max scale parameters of the update checker function.
+ *
+ * Due to src being in 16.16 fixed point and dest being in integer pixels,
+ * 1<<16 represents no scaling.
+ */
+#define DRM_PLANE_HELPER_NO_SCALING (1<<16)
+
 /**
  * DOC: plane helpers
  *
