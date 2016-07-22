@@ -150,6 +150,7 @@ struct ttm_tt {
  */
 struct ttm_dma_tt {
 	struct ttm_tt ttm;
+	void **cpu_address;
 #ifdef __NetBSD__
 	bus_dma_segment_t *dma_segs;
 	bus_dmamap_t dma_address;
