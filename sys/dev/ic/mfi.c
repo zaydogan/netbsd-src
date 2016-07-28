@@ -333,7 +333,9 @@ mfi_put_ccb(struct mfi_ccb *ccb)
 	ccb->ccb_sgl = NULL;
 	ccb->ccb_data = NULL;
 	ccb->ccb_len = 0;
-	if (sc->sc_ioptype == MFI_IOP_TBOLT) {
+	if (sc->sc_ioptype == MFI_IOP_TBOLT ||
+	    sc->sc_ioptype == MFI_IOP_INVADER ||
+	    sc->sc_ioptype == MFI_IOP_FURY) {
 		/* erase tb_request_desc but preserve SMID */
 		int index = ccb->ccb_tb_request_desc.header.SMID;
 		ccb->ccb_tb_request_desc.words = 0;
@@ -380,7 +382,9 @@ mfi_init_ccb(struct mfi_softc *sc)
 
 	sc->sc_ccb = malloc(sizeof(struct mfi_ccb) * sc->sc_max_cmds,
 	    M_DEVBUF, M_WAITOK|M_ZERO);
-	if (sc->sc_ioptype == MFI_IOP_TBOLT) {
+	if (sc->sc_ioptype == MFI_IOP_TBOLT ||
+	    sc->sc_ioptype == MFI_IOP_INVADER ||
+	    sc->sc_ioptype == MFI_IOP_FURY) {
 		/*
 		 * The first 256 bytes (SMID 0) is not used.
 		 * Don't add to the cmd list.
@@ -421,7 +425,9 @@ mfi_init_ccb(struct mfi_softc *sc)
 			    "cannot create ccb dmamap (%d)\n", error);
 			goto destroy;
 		}
-		if (sc->sc_ioptype == MFI_IOP_TBOLT) {
+		if (sc->sc_ioptype == MFI_IOP_TBOLT ||
+		    sc->sc_ioptype == MFI_IOP_INVADER ||
+		    sc->sc_ioptype == MFI_IOP_FURY) {
 			offset = MEGASAS_THUNDERBOLT_NEW_MSG_SIZE * i;
 			ccb->ccb_tb_io_request =
 			    (struct mfi_mpi2_request_raid_scsi_io *)
@@ -576,15 +582,21 @@ mfi_transition_firmware(struct mfi_softc *sc)
 			return 1;
 		case MFI_STATE_WAIT_HANDSHAKE:
 			if (sc->sc_ioptype == MFI_IOP_SKINNY ||
-			    sc->sc_ioptype == MFI_IOP_TBOLT)
-				mfi_write(sc, MFI_SKINNY_IDB, MFI_INIT_CLEAR_HANDSHAKE);
+			    sc->sc_ioptype == MFI_IOP_TBOLT ||
+			    sc->sc_ioptype == MFI_IOP_INVADER ||
+			    sc->sc_ioptype == MFI_IOP_FURY)
+				mfi_write(sc, MFI_SKINNY_IDB,
+				    MFI_INIT_CLEAR_HANDSHAKE);
 			else
-				mfi_write(sc, MFI_IDB, MFI_INIT_CLEAR_HANDSHAKE);
+				mfi_write(sc, MFI_IDB,
+				    MFI_INIT_CLEAR_HANDSHAKE);
 			max_wait = 2;
 			break;
 		case MFI_STATE_OPERATIONAL:
 			if (sc->sc_ioptype == MFI_IOP_SKINNY ||
-			    sc->sc_ioptype == MFI_IOP_TBOLT)
+			    sc->sc_ioptype == MFI_IOP_TBOLT ||
+			    sc->sc_ioptype == MFI_IOP_INVADER ||
+			    sc->sc_ioptype == MFI_IOP_FURY)
 				mfi_write(sc, MFI_SKINNY_IDB, MFI_INIT_READY);
 			else
 				mfi_write(sc, MFI_IDB, MFI_INIT_READY);
@@ -601,7 +613,9 @@ mfi_transition_firmware(struct mfi_softc *sc)
 			break;
 		case MFI_STATE_BOOT_MESSAGE_PENDING:
 			if (sc->sc_ioptype == MFI_IOP_SKINNY ||
-			    sc->sc_ioptype == MFI_IOP_TBOLT) {
+			    sc->sc_ioptype == MFI_IOP_TBOLT ||
+			    sc->sc_ioptype == MFI_IOP_INVADER ||
+			    sc->sc_ioptype == MFI_IOP_FURY) {
 				mfi_write(sc, MFI_SKINNY_IDB, MFI_INIT_HOTPLUG);
 			} else {
 				mfi_write(sc, MFI_IDB, MFI_INIT_HOTPLUG);
@@ -947,7 +961,9 @@ mfi_detach(struct mfi_softc *sc, int flags)
 	mfi_intr_disable(sc);
 	mfi_shutdown(sc->sc_dev, 0);
 
-	if (sc->sc_ioptype == MFI_IOP_TBOLT) {
+	if (sc->sc_ioptype == MFI_IOP_TBOLT ||
+	    sc->sc_ioptype == MFI_IOP_INVADER ||
+	    sc->sc_ioptype == MFI_IOP_FURY) {
 		workqueue_destroy(sc->sc_ldsync_wq);
 		mfi_put_ccb(sc->sc_ldsync_ccb);
 		mfi_freemem(sc, &sc->sc_tbolt_reqmsgpool);
@@ -1038,6 +1054,8 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 		sc->sc_iop = &mfi_iop_skinny;
 		break;
 	case MFI_IOP_TBOLT:
+	case MFI_IOP_INVADER:
+	case MFI_IOP_FURY:
 		sc->sc_iop = &mfi_iop_tbolt;
 		break;
 	default:
@@ -1052,7 +1070,9 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 	status = mfi_fw_state(sc);
 	sc->sc_max_cmds = status & MFI_STATE_MAXCMD_MASK;
 	max_sgl = (status & MFI_STATE_MAXSGL_MASK) >> 16;
-	if (sc->sc_ioptype == MFI_IOP_TBOLT) {
+	if (sc->sc_ioptype == MFI_IOP_TBOLT ||
+	    sc->sc_ioptype == MFI_IOP_INVADER ||
+	    sc->sc_ioptype == MFI_IOP_FURY) {
 		sc->sc_max_sgl = min(max_sgl, (128 * 1024) / PAGE_SIZE + 1);
 		sc->sc_sgl_size = sizeof(struct mfi_sg_ieee);
 	} else if (sc->sc_64bit_dma) {
@@ -1065,7 +1085,9 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 	DNPRINTF(MFI_D_MISC, "%s: max commands: %u, max sgl: %u\n",
 	    DEVNAME(sc), sc->sc_max_cmds, sc->sc_max_sgl);
 
-	if (sc->sc_ioptype == MFI_IOP_TBOLT) {
+	if (sc->sc_ioptype == MFI_IOP_TBOLT ||
+	    sc->sc_ioptype == MFI_IOP_INVADER ||
+	    sc->sc_ioptype == MFI_IOP_FURY) {
 		uint32_t tb_mem_size;
 		/* for Alignment */
 		tb_mem_size = MEGASAS_THUNDERBOLT_MSG_ALLIGNMENT;
@@ -1159,7 +1181,9 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 	}
 
 	/* kickstart firmware with all addresses and pointers */
-	if (sc->sc_ioptype == MFI_IOP_TBOLT) {
+	if (sc->sc_ioptype == MFI_IOP_TBOLT ||
+	    sc->sc_ioptype == MFI_IOP_INVADER ||
+	    sc->sc_ioptype == MFI_IOP_FURY) {
 		if (mfi_tbolt_init_MFI_queue(sc)) {
 			aprint_error_dev(sc->sc_dev,
 			    "could not initialize firmware\n");
@@ -1273,7 +1297,9 @@ nosense:
 noframe:
 	mfi_freemem(sc, &sc->sc_pcq);
 nopcq:
-	if (sc->sc_ioptype == MFI_IOP_TBOLT) {
+	if (sc->sc_ioptype == MFI_IOP_TBOLT ||
+	    sc->sc_ioptype == MFI_IOP_INVADER ||
+	    sc->sc_ioptype == MFI_IOP_FURY) {
 		if (sc->sc_tbolt_reqmsgpool)
 			mfi_freemem(sc, &sc->sc_tbolt_reqmsgpool);
 		if (sc->sc_tbolt_verbuf)
@@ -1782,7 +1808,9 @@ mfi_create_sgl(struct mfi_ccb *ccb, int flags)
 	sgl = ccb->ccb_sgl;
 	sgd = ccb->ccb_dmamap->dm_segs;
 	for (i = 0; i < ccb->ccb_dmamap->dm_nsegs; i++) {
-		if (sc->sc_ioptype == MFI_IOP_TBOLT &&
+		if ((sc->sc_ioptype == MFI_IOP_TBOLT ||
+		     sc->sc_ioptype == MFI_IOP_INVADER ||
+		     sc->sc_ioptype == MFI_IOP_FURY) &&
 		    (hdr->mfh_cmd == MFI_CMD_PD_SCSI_IO ||
 		     hdr->mfh_cmd == MFI_CMD_LD_READ ||
 		     hdr->mfh_cmd == MFI_CMD_LD_WRITE)) {
@@ -2886,6 +2914,7 @@ mfi_tbolt_post(struct mfi_softc *sc, struct mfi_ccb *ccb)
 static void
 mfi_tbolt_build_mpt_ccb(struct mfi_ccb *ccb)
 {
+	struct mfi_softc *sc = ccb->ccb_sc;
 	union mfi_mpi2_request_descriptor *req_desc = &ccb->ccb_tb_request_desc;
 	struct mfi_mpi2_request_raid_scsi_io *io_req = ccb->ccb_tb_io_request;
 	struct mpi25_ieee_sge_chain64 *mpi25_ieee_chain;
@@ -2904,8 +2933,12 @@ mfi_tbolt_build_mpt_ccb(struct mfi_ccb *ccb)
 	  In MFI pass thru, nextChainOffset will always be zero to
 	  indicate the end of the chain.
 	*/
-	mpi25_ieee_chain->Flags= MPI2_IEEE_SGE_FLAGS_CHAIN_ELEMENT
-		| MPI2_IEEE_SGE_FLAGS_IOCPLBNTA_ADDR;
+	if (sc->sc_ioptype == MFI_IOP_INVADER ||
+	    sc->sc_ioptype == MFI_IOP_FURY)
+		mpi25_ieee_chain->Flags = MPI2_IEEE_SGE_FLAGS_CHAIN_ELEMENT;
+	else
+		mpi25_ieee_chain->Flags = MPI2_IEEE_SGE_FLAGS_CHAIN_ELEMENT |
+		    MPI2_IEEE_SGE_FLAGS_IOCPLBNTA_ADDR;
 
 	/* setting the length to the maximum length */
 	mpi25_ieee_chain->Length = 1024;
@@ -2913,10 +2946,9 @@ mfi_tbolt_build_mpt_ccb(struct mfi_ccb *ccb)
 	req_desc->header.RequestFlags = (MPI2_REQ_DESCRIPT_FLAGS_SCSI_IO <<
 	    MFI_REQ_DESCRIPT_FLAGS_TYPE_SHIFT);
 	ccb->ccb_flags |= MFI_CCB_F_TBOLT;
-	bus_dmamap_sync(ccb->ccb_sc->sc_dmat,
-	    MFIMEM_MAP(ccb->ccb_sc->sc_tbolt_reqmsgpool), 
-	    ccb->ccb_tb_pio_request -
-	     MFIMEM_DVA(ccb->ccb_sc->sc_tbolt_reqmsgpool),
+	bus_dmamap_sync(sc->sc_dmat,
+	    MFIMEM_MAP(sc->sc_tbolt_reqmsgpool),
+	    ccb->ccb_tb_pio_request - MFIMEM_DVA(sc->sc_tbolt_reqmsgpool),
 	    MEGASAS_THUNDERBOLT_NEW_MSG_SIZE,
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 }
@@ -3118,7 +3150,7 @@ mfi_tbolt_intrh(void *arg)
 		    "desc %#" PRIx64 " ccb %p\n", DEVNAME(sc), smid,
 		    sc->sc_last_reply_idx, desc->words, ccb);
 		KASSERT(ccb->ccb_state == MFI_CCB_RUNNING);
-		if (ccb->ccb_flags & MFI_CCB_F_TBOLT_IO &&
+		if ((ccb->ccb_flags & MFI_CCB_F_TBOLT_IO) &&
 		    ccb->ccb_tb_io_request->ChainOffset != 0) {
 			bus_dmamap_sync(sc->sc_dmat,
 			    MFIMEM_MAP(sc->sc_tbolt_reqmsgpool), 
@@ -3289,10 +3321,22 @@ mfi_tbolt_create_sgl(struct mfi_ccb *ccb, int flags)
 		sge_idx = sge_count;
 	}
 
+	if (sc->sc_ioptype == MFI_IOP_INVADER ||
+	    sc->sc_ioptype == MFI_IOP_FURY) {
+		struct mpi25_ieee_sge_chain64 *sgl_end =
+		    sgl_ptr + (MEGASAS_THUNDERBOLT_MAX_SGE_IN_MAINMSG - 1);
+		sgl_end->Flags = 0;
+	}
+
 	for (i = 0; i < sge_idx; i++) {
 		sgl_ptr->Address = htole64(sgd[i].ds_addr);
 		sgl_ptr->Length = htole32(sgd[i].ds_len);
-		sgl_ptr->Flags = 0;
+		if (i == sge_count - 1 &&
+		    (sc->sc_ioptype == MFI_IOP_INVADER ||
+		     sc->sc_ioptype == MFI_IOP_FURY))
+			sgl_ptr->Flags = MPI25_IEEE_SGE_FLAGS_END_OF_LIST;
+		else
+			sgl_ptr->Flags = 0;
 		if (sge_idx < sge_count) {
 			DNPRINTF(MFI_D_DMA,
 			    "sgl %p %d 0x%" PRIx64 " len 0x%" PRIx32
@@ -3309,8 +3353,12 @@ mfi_tbolt_create_sgl(struct mfi_ccb *ccb, int flags)
 		sg_chain = sgl_ptr;
 		/* Prepare chain element */
 		sg_chain->NextChainOffset = 0;
-		sg_chain->Flags = (MPI2_IEEE_SGE_FLAGS_CHAIN_ELEMENT |
-		    MPI2_IEEE_SGE_FLAGS_IOCPLBNTA_ADDR);
+		if (sc->sc_ioptype == MFI_IOP_INVADER ||
+		    sc->sc_ioptype == MFI_IOP_FURY)
+			sg_chain->Flags = MPI2_IEEE_SGE_FLAGS_CHAIN_ELEMENT;
+		else
+			sg_chain->Flags = (MPI2_IEEE_SGE_FLAGS_CHAIN_ELEMENT |
+			    MPI2_IEEE_SGE_FLAGS_IOCPLBNTA_ADDR);
 		sg_chain->Length =  (sizeof(mpi2_sge_io_union) *
 		    (sge_count - sge_idx));
 		sg_chain->Address = ccb->ccb_tb_psg_frame;
@@ -3322,7 +3370,13 @@ mfi_tbolt_create_sgl(struct mfi_ccb *ccb, int flags)
 		for (; i < sge_count; i++) {
 			sgl_ptr->Address = htole64(sgd[i].ds_addr);
 			sgl_ptr->Length = htole32(sgd[i].ds_len);
-			sgl_ptr->Flags = 0;
+			if (i == sge_count - 1 &&
+			    (sc->sc_ioptype == MFI_IOP_INVADER ||
+			     sc->sc_ioptype == MFI_IOP_FURY))
+				sgl_ptr->Flags =
+				    MPI25_IEEE_SGE_FLAGS_END_OF_LIST;
+			else
+				sgl_ptr->Flags = 0;
 			DNPRINTF(MFI_D_DMA,
 			    "sgl %p %d 0x%" PRIx64 " len 0x%" PRIx32
 			    " flags 0x%x\n", sgl_ptr, i, sgl_ptr->Address,

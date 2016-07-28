@@ -44,6 +44,8 @@ __KERNEL_RCSID(0, "$NetBSD: mfi_pci.c,v 1.19 2016/07/14 04:00:46 msaitoh Exp $")
 struct mfi_pci_softc {
 	struct mfi_softc	psc_sc;
 	pci_chipset_tag_t	psc_pc;
+	pci_intr_handle_t	*psc_ih;
+	int			psc_nih;
 };
 
 const struct mfi_pci_device *mfi_pci_find_device(struct pci_attach_args *);
@@ -144,6 +146,10 @@ struct mfi_pci_device {
 	  MFI_IOP_SKINNY,	mfi_skinny_subtypes },
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_2208,
 	  MFI_IOP_TBOLT,	mfi_tbolt_subtypes },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_3108,
+	  MFI_IOP_INVADER,	NULL },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_3008,
+	  MFI_IOP_FURY,		NULL },
 };
 
 const struct mfi_pci_device *
@@ -181,6 +187,7 @@ mfi_pci_detach(device_t self, int flags)
 
 	/* xxx */
 	pci_intr_disestablish(psc->psc_pc, sc->sc_ih);
+	pci_intr_release(psc->psc_pc, psc->psc_ih, psc->psc_nih);
 	bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_size);
 	return 0;
 }
@@ -194,7 +201,6 @@ mfi_pci_attach(device_t parent, device_t self, void *aux)
 	const struct mfi_pci_device *mpd;
 	const struct mfi_pci_subtype *st;
 	const char		*intrstr;
-	pci_intr_handle_t	ih;
 	pcireg_t		csr;
 	int			regbar;
 	const char 		*subtype = NULL;
@@ -211,7 +217,8 @@ mfi_pci_attach(device_t parent, device_t self, void *aux)
 	}
 
 	if (mpd->mpd_iop == MFI_IOP_GEN2 || mpd->mpd_iop == MFI_IOP_SKINNY ||
-	    mpd->mpd_iop == MFI_IOP_TBOLT)
+	    mpd->mpd_iop == MFI_IOP_TBOLT || mpd->mpd_iop == MFI_IOP_INVADER ||
+	    mpd->mpd_iop == MFI_IOP_FURY)
 		regbar = MFI_BAR_GEN2;
 	else
 		regbar = MFI_BAR;
@@ -225,7 +232,10 @@ mfi_pci_attach(device_t parent, device_t self, void *aux)
 	}
 
 	sc->sc_dmat = pa->pa_dmat;
-	if (mpd->mpd_iop == MFI_IOP_TBOLT && pci_dma64_available(pa)) {
+	if ((mpd->mpd_iop == MFI_IOP_TBOLT ||
+	     mpd->mpd_iop == MFI_IOP_INVADER ||
+	     mpd->mpd_iop == MFI_IOP_FURY)
+	    && pci_dma64_available(pa)) {
 		sc->sc_datadmat = pa->pa_dmat64;
 		sc->sc_64bit_dma = 1;
 	} else {
@@ -233,24 +243,29 @@ mfi_pci_attach(device_t parent, device_t self, void *aux)
 		sc->sc_64bit_dma = 0;
 	}
 
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_alloc(pa, &psc->psc_ih, NULL, 0)) {
 		aprint_error(": can't map interrupt\n");
 		bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_size);
 		return;
 	}
-	intrstr = pci_intr_string(pa->pa_pc, ih, intrbuf, sizeof(intrbuf));
-	if (mpd->mpd_iop == MFI_IOP_TBOLT) {
-		sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_BIO,
-		    mfi_tbolt_intrh, sc);
+	psc->psc_nih = 1;
+	intrstr = pci_intr_string(pa->pa_pc, psc->psc_ih[0], intrbuf,
+	    sizeof(intrbuf));
+	if (mpd->mpd_iop == MFI_IOP_TBOLT ||
+	    mpd->mpd_iop == MFI_IOP_INVADER ||
+	    mpd->mpd_iop == MFI_IOP_FURY) {
+		sc->sc_ih = pci_intr_establish(pa->pa_pc, psc->psc_ih[0],
+		    IPL_BIO, mfi_tbolt_intrh, sc);
 	} else {
-		sc->sc_ih =
-		    pci_intr_establish(pa->pa_pc, ih, IPL_BIO, mfi_intr, sc);
+		sc->sc_ih = pci_intr_establish(pa->pa_pc, psc->psc_ih[0],
+		    IPL_BIO, mfi_intr, sc);
 	}
 	if (!sc->sc_ih) {
 		aprint_error(": can't establish interrupt");
 		if (intrstr)
 			aprint_error(" at %s", intrstr);
 		aprint_error("\n");
+		pci_intr_release(psc->psc_pc, psc->psc_ih, psc->psc_nih);
 		bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_size);
 		return;
 	}

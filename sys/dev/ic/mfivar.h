@@ -117,7 +117,9 @@ enum mfi_iop {
 	MFI_IOP_PPC,
 	MFI_IOP_GEN2,
 	MFI_IOP_SKINNY,
-	MFI_IOP_TBOLT
+	MFI_IOP_TBOLT,
+	MFI_IOP_INVADER,
+	MFI_IOP_FURY
 };
 
 struct mfi_iop_ops {
