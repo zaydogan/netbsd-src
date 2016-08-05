@@ -97,8 +97,9 @@ main(int argc, char *argv[])
 		case 'n':
 			errno = 0;
 			linecnt = strtoimax(optarg, &ep, 10);
-			if ((linecnt == INTMAX_MAX && errno == ERANGE) ||
-			    *ep || linecnt <= 0)
+			if ((errno == ERANGE &&
+			    (linecnt == INTMAX_MAX || linecnt == INTMAX_MIN)) ||
+			    *ep || linecnt == 0)
 				errx(1, "illegal line count -- %s", optarg);
 			break;
 
@@ -140,38 +141,130 @@ main(int argc, char *argv[])
 }
 
 static void
-head(FILE *fp, intmax_t cnt, intmax_t bytecnt)
+head_bytecnt(FILE *fp, intmax_t bytecnt)
 {
 	char buf[65536];
 	size_t len, rv, rv2;
+
+	while (bytecnt) {
+		len = sizeof(buf);
+		if (bytecnt > (intmax_t)sizeof(buf))
+			len = sizeof(buf);
+		else
+			len = bytecnt;
+		rv = fread(buf, 1, len, fp);
+		if (rv == 0)
+			break; /* Distinguish EOF and error? */
+		rv2 = fwrite(buf, 1, rv, stdout);
+		if (rv2 != rv) {
+			if (feof(stdout))
+				errx(1, "EOF on stdout");
+			else
+				err(1, "failure writing to stdout");
+		}
+		bytecnt -= rv;
+	}
+}
+
+static void
+head_linecnt(FILE *fp, intmax_t cnt)
+{
 	int ch;
 
-	if (bytecnt) {
-		while (bytecnt) {
-			len = sizeof(buf);
-			if (bytecnt > (intmax_t)sizeof(buf))
-				len = sizeof(buf);
+	while ((ch = getc(fp)) != EOF) {
+		if (putchar(ch) == EOF)
+			err(1, "stdout");
+		if (ch == '\n' && --cnt == 0)
+			break;
+	}
+}
+
+struct linebuf {
+	char buf[BUFSIZ];
+	size_t size;
+	struct linebuf *next;
+	struct linebuf *next_line;
+};
+
+static void
+output_linebuf(struct linebuf **headp)
+{
+	struct linebuf *tmp, *next;
+	size_t rv;
+
+	tmp = *headp;
+	*headp = tmp->next_line;
+	while (tmp != NULL) {
+		next = tmp->next;
+		rv = fwrite(tmp->buf, 1, tmp->size, stdout);
+		if (rv != tmp->size) {
+			if (feof(stdout))
+				errx(1, "EOF on stdout");
 			else
-				len = bytecnt;
-			rv = fread(buf, 1, len, fp);
-			if (rv == 0)
-				break; /* Distinguish EOF and error? */
-			rv2 = fwrite(buf, 1, rv, stdout);
-			if (rv2 != rv) {
-				if (feof(stdout))
-					errx(1, "EOF on stdout");
-				else
-					err(1, "failure writing to stdout");
-			}
-			bytecnt -= rv;
+				err(1, "failure writing to stdout");
 		}
+		free(tmp);
+		tmp = next;
+	}
+}
+
+static void
+head_negative_linecnt(FILE *fp, intmax_t cnt)
+{
+	struct linebuf *head, *curr, *tmp;
+	int ch, lastch;
+
+	head = calloc(1, sizeof(*head));
+	if (head == NULL)
+		err(1, "calloc");
+	curr = head;
+
+	lastch = EOF;
+	while ((ch = getc(fp)) != EOF) {
+		lastch = ch;
+		curr->buf[curr->size++] = (char)ch;
+		if (ch == '\n') {
+			if (cnt == 0)
+				output_linebuf(&head);
+			else
+				cnt++;
+			tmp = calloc(1, sizeof(*tmp));
+			if (tmp == NULL)
+				err(1, "calloc");
+			curr->next_line = tmp;
+			curr = tmp;
+		} else if (curr->size == sizeof(curr->buf)) {
+			tmp = calloc(1, sizeof(*tmp));
+			if (tmp == NULL)
+				err(1, "calloc");
+			curr->next = tmp;
+			curr = tmp;
+		}
+	}
+	if (cnt == 0 && lastch != '\n')
+		output_linebuf(&head);
+
+	while (head != NULL) {
+		tmp = head;
+		head = tmp->next_line;
+		while (tmp != NULL) {
+			struct linebuf *next = tmp->next;
+			free(tmp);
+			tmp = next;
+		}
+	}
+}
+
+static void
+head(FILE *fp, intmax_t cnt, intmax_t bytecnt)
+{
+
+	if (bytecnt) {
+		head_bytecnt(fp, bytecnt);
+	} else if (cnt > 0) {
+		head_linecnt(fp, cnt);
 	} else {
-		while ((ch = getc(fp)) != EOF) {
-			if (putchar(ch) == EOF)
-				err(1, "stdout");
-			if (ch == '\n' && --cnt == 0)
-				break;
-		}
+		head_negative_linecnt(fp, cnt);
 	}
 }
 
