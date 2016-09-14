@@ -609,8 +609,9 @@ adma_done:
 				SMC_CAPS_MMC_HS200;
 	if (ISSET(caps2, SDHC_SDR50_SUPP))
 		saa.saa_caps |= SMC_CAPS_UHS_SDR50;
-	if (ISSET(caps2, SDHC_DDR50_SUPP))
-		saa.saa_caps |= SMC_CAPS_UHS_DDR50;
+	if (ISSET(caps2, SDHC_DDR50_SUPP)) {
+		saa.saa_caps |= SMC_CAPS_UHS_DDR50 | SMC_CAPS_MMC_DDR52;
+	}
 	if (ISSET(hp->flags, SHF_USE_DMA)) {
 		saa.saa_caps |= SMC_CAPS_DMA;
 		if (!ISSET(hp->sc->sc_flags, SDHC_FLAG_ENHANCED))
