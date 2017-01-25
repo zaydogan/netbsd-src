@@ -1369,3 +1369,39 @@ options 	PAX_MPROTECT=1		# PaX mprotect(2) restrictions
 options 	PAX_MPROTECT_DEBUG=1	# PaX mprotect debug
 options 	PAX_ASLR=1		# PaX Address Space Layout Randomization
 options 	PAX_ASLR_DEBUG=1	# PaX ASLR debug
+
+#
+# from KOHARU
+#
+makeoptions	COPTS="-O2 -fno-omit-frame-pointer -falign-functions=16"
+
+options 	DDB_VERBOSE_HELP
+options 	PCIVERBOSE	# verbose PCI device autoconfig messages
+options 	USBVERBOSE	# verbose USB device autoconfig messages
+options 	HDAUDIOVERBOSE	# verbose HDAUDIO driver messages
+options 	NET_MPSAFE
+
+options 	MSGBUFSIZE="(65536*4)"
+
+options 	FONT_DROID_SANS_MONO19x36
+options 	FONT_BOLD8x16
+
+com*		at acpi?		# Serial communications interface
+
+# Serial Presence Detect capable memory modules
+spdmem* at iic? addr 0x50
+spdmem* at iic? addr 0x51
+spdmem* at iic? addr 0x52
+spdmem* at iic? addr 0x53
+spdmem* at iic? addr 0x54
+spdmem* at iic? addr 0x55
+spdmem* at iic? addr 0x56
+spdmem* at iic? addr 0x57
+sdtemp* at iic? addr 0x18
+sdtemp* at iic? addr 0x19
+sdtemp* at iic? addr 0x1a
+sdtemp* at iic? addr 0x1b
+sdtemp* at iic? addr 0x1c
+sdtemp* at iic? addr 0x1d
+sdtemp* at iic? addr 0x1e
+sdtemp* at iic? addr 0x1f
