@@ -1311,11 +1311,13 @@ get_line(FILE *stream, char *buf, size_t buflen, const char **errormsg)
 	size_t	len;
 
 	if (fgets(buf, buflen, stream) == NULL) {
-		if (feof(stream)) {	/* EOF */
+		if (feof(stream)) {		/* EOF */
 			rv = -2;
 			if (errormsg)
 				*errormsg = "\nEOF received";
-		} else  {		/* error */
+		} else if (xfer_abort_p) {	/* timeout */
+			rv = -1;
+		} else  {			/* error */
 			rv = -1;
 			if (errormsg)
 				*errormsg = "Error encountered";
@@ -1436,14 +1438,14 @@ ftp_connect(int sock, const struct sockaddr *name, socklen_t namelen, int pe)
 			pfd[0].revents = 0;
 			rv = ftp_poll(pfd, 1, timeout);
 						/* loop until poll ! EINTR */
-		} while (rv == -1 && errno == EINTR);
+		} while (rv == -1 && errno == EINTR && !xfer_abort_p);
 
 		if (rv == 0) {			/* poll (connect) timed out */
 			errno = ETIMEDOUT;
 			goto connecterror;
 		}
 
-		if (rv == -1) {			/* poll error */
+		if (rv == -1 || xfer_abort_p) {	/* poll error */
 			goto connecterror;
 		} else if (pfd[0].revents & (POLLIN|POLLOUT)) {
 			slen = sizeof(error);	/* OK, or pending error */

@@ -54,6 +54,7 @@ __RCSID("$NetBSD: ssl.c,v 1.6 2018/02/06 19:26:02 christos Exp $");
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+#include "ftp_var.h"
 #include "ssl.h"
 
 extern int quit_time, verbose, ftp_debug;
@@ -114,7 +115,7 @@ fetch_writev(struct fetch_connect *conn, struct iovec *iov, int iovcnt)
 			errno = 0;
 			r = select(conn->sd + 1, NULL, &writefds, NULL, &delta);
 			if (r == -1) {
-				if (errno == EINTR)
+				if (errno == EINTR && !xfer_abort_p)
 					continue;
 				return -1;
 			}
@@ -131,7 +132,7 @@ fetch_writev(struct fetch_connect *conn, struct iovec *iov, int iovcnt)
 			return -1;
 		}
 		if (len < 0) {
-			if (errno == EINTR)
+			if (errno == EINTR && !xfer_abort_p)
 				continue;
 			return -1;
 		}
@@ -383,26 +384,26 @@ fetch_read(void *ptr, size_t size, size_t nmemb, struct fetch_connect *conn)
 	}
 
 	while (len > 0) {
-		/*
-		 * The socket is non-blocking.  Instead of the canonical
-		 * select() -> read(), we do the following:
-		 *
-		 * 1) call read() or SSL_read().
-		 * 2) if an error occurred, return -1.
-		 * 3) if we received data but we still expect more,
-		 *    update our counters and loop.
-		 * 4) if read() or SSL_read() signaled EOF, return.
-		 * 5) if we did not receive any data but we're not at EOF,
-		 *    call select().
-		 *
-		 * In the SSL case, this is necessary because if we
-		 * receive a close notification, we have to call
-		 * SSL_read() one additional time after we've read
-		 * everything we received.
-		 *
-		 * In the non-SSL case, it may improve performance (very
-		 * slightly) when reading small amounts of data.
-		 */
+		FD_ZERO(&readfds);
+		while (!FD_ISSET(conn->sd, &readfds)) {
+			FD_SET(conn->sd, &readfds);
+			if (quit_time > 0) {
+				gettimeofday(&now, NULL);
+				if (!timercmp(&timeout, &now, >)) {
+					errno = ETIMEDOUT;
+					return -1;
+				}
+				timersub(&timeout, &now, &delta);
+			}
+			errno = 0;
+			if (select(conn->sd + 1, &readfds, NULL, NULL,
+				quit_time > 0 ? &delta : NULL) < 0) {
+				if (errno == EINTR && !xfer_abort_p)
+					continue;
+				return -1;
+			}
+		}
+
 		if (conn->ssl != NULL)
 			rlen = fetch_ssl_read(conn->ssl, buf, len);
 		else
@@ -418,25 +419,6 @@ fetch_read(void *ptr, size_t size, size_t nmemb, struct fetch_connect *conn)
 			if (errno == EINTR)
 				fetch_cache_data(conn, start, total);
 			return -1;
-		}
-		FD_ZERO(&readfds);
-		while (!FD_ISSET(conn->sd, &readfds)) {
-			FD_SET(conn->sd, &readfds);
-			if (quit_time > 0) {
-				gettimeofday(&now, NULL);
-				if (!timercmp(&timeout, &now, >)) {
-					errno = ETIMEDOUT;
-					return -1;
-				}
-				timersub(&timeout, &now, &delta);
-			}
-			errno = 0;
-			if (select(conn->sd + 1, &readfds, NULL, NULL,
-				quit_time > 0 ? &delta : NULL) < 0) {
-				if (errno == EINTR)
-					continue;
-				return -1;
-			}
 		}
 	}
 	return total;
@@ -514,11 +496,13 @@ fetch_getline(struct fetch_connect *conn, char *buf, size_t buflen,
 	int rv;
 
 	if (fetch_getln(buf, buflen, conn) == NULL) {
-		if (conn->iseof) {	/* EOF */
+		if (conn->iseof) {		/* EOF */
 			rv = -2;
 			if (errormsg)
 				*errormsg = "\nEOF received";
-		} else {		/* error */
+		} else if (xfer_abort_p) {	/* timeout */
+			rv = -1;
+		} else {			/* error */
 			rv = -1;
 			if (errormsg)
 				*errormsg = "Error encountered";
@@ -551,10 +535,10 @@ fetch_start_ssl(int sock, const char *servername)
 {
 	SSL *ssl;
 	SSL_CTX *ctx;
-	int ret, ssl_err;
+	int ret, ssl_err, flags;
 
 	/* Init the SSL library and context */
-	if (!SSL_library_init()){
+	if (!SSL_library_init()) {
 		fprintf(ttyout, "SSL library init failed\n");
 		return NULL;
 	}
@@ -565,7 +549,7 @@ fetch_start_ssl(int sock, const char *servername)
 	SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
 
 	ssl = SSL_new(ctx);
-	if (ssl == NULL){
+	if (ssl == NULL) {
 		fprintf(ttyout, "SSL context creation failed\n");
 		SSL_CTX_free(ctx);
 		return NULL;
@@ -573,9 +557,23 @@ fetch_start_ssl(int sock, const char *servername)
 	SSL_set_fd(ssl, sock);
 	if (!SSL_set_tlsext_host_name(ssl, __UNCONST(servername))) {
 		fprintf(ttyout, "SSL hostname setting failed\n");
-		SSL_CTX_free(ctx);
+		SSL_free(ssl);
 		return NULL;
 	}
+
+	/* save current socket flags */
+	if ((flags = fcntl(sock, F_GETFL, 0)) == -1) {
+		fprintf(ttyout, "Can't save socket flags for SSL connect\n");
+		SSL_free(ssl);
+		return NULL;
+	}
+
+	/* set non-blocking connect */
+	if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) == -1) {
+		fprintf(ttyout, "Can't set non-blocking for SSL connect\n");
+		return NULL;
+	}
+
 	while ((ret = SSL_connect(ssl)) == -1) {
 		ssl_err = SSL_get_error(ssl, ret);
 		if (ssl_err != SSL_ERROR_WANT_READ &&
@@ -584,6 +582,13 @@ fetch_start_ssl(int sock, const char *servername)
 			SSL_free(ssl);
 			return NULL;
 		}
+	}
+
+	/* restore socket flags */
+	if (fcntl(sock, F_SETFL, flags) == -1) {
+		fprintf(ttyout, "Can't restore socket flags for SSL connect\n");
+		SSL_free(ssl);
+		return NULL;
 	}
 
 	if (ftp_debug && verbose) {
@@ -606,7 +611,6 @@ fetch_start_ssl(int sock, const char *servername)
 
 	return ssl;
 }
-
 
 void
 fetch_set_ssl(struct fetch_connect *conn, void *ssl)

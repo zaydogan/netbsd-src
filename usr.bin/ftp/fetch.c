@@ -539,8 +539,6 @@ parse_url(const char *url, const char *desc, struct urlinfo *ui,
 	return (0);
 }
 
-sigjmp_buf	httpabort;
-
 static int
 ftp_socket(const struct urlinfo *ui, void **ssl)
 {
@@ -864,6 +862,8 @@ getresponseline(FETCH *fin, char *buf, size_t buflen, int *len)
 	alarmtimer(quit_time ? quit_time : 60);
 	*len = fetch_getline(fin, buf, buflen, &errormsg);
 	alarmtimer(0);
+	if (xfer_abort_p)
+		return C_CLEANUP;
 	if (*len < 0) {
 		if (*errormsg == '\n')
 			errormsg++;
@@ -952,8 +952,7 @@ parse_posinfo(const char **cp, struct posinfo *pi)
 #ifndef NO_AUTH
 static void
 do_auth(int hcode, const char *url, const char *penv, struct authinfo *wauth,
-    struct authinfo *pauth, char **auth, const char *message,
-    volatile int *rval)
+    struct authinfo *pauth, char **auth, const char *message, int *rval)
 {
 	struct authinfo aauth;
 	char *response;
@@ -998,8 +997,7 @@ do_auth(int hcode, const char *url, const char *penv, struct authinfo *wauth,
 static int
 negotiate_connection(FETCH *fin, const char *url, const char *penv,
     struct posinfo *pi, time_t *mtime, struct authinfo *wauth,
-    struct authinfo *pauth, volatile int *rval, volatile int *ischunked,
-    char **auth)
+    struct authinfo *pauth, int *rval, int *ischunked, char **auth)
 {
 	int			len, hcode, rv;
 	char			buf[FTPBUFLEN], *ep;
@@ -1159,7 +1157,7 @@ out:
 static int
 connectmethod(FETCH *fin, const char *url, const char *penv,
     struct urlinfo *oui, struct urlinfo *ui, struct authinfo *wauth,
-    struct authinfo *pauth, char **auth, int *hasleading, volatile int *rval)
+    struct authinfo *pauth, char **auth, int *hasleading, int *rval)
 {
 	void *ssl;
 	int hcode, rv;
@@ -1264,14 +1262,14 @@ out:
 static int
 fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 {
-	sigfunc volatile	oldint;
-	sigfunc volatile	oldpipe;
-	sigfunc volatile	oldalrm;
-	sigfunc volatile	oldquit;
-	int volatile		s;
+	sigfunc			oldint;
+	sigfunc			oldpipe;
+	sigfunc			oldalrm;
+	sigfunc			oldquit;
+	int			s;
 	struct stat		sb;
-	int volatile		isproxy;
-	int volatile 		rval, ischunked;
+	int			isproxy;
+	int 			rval, ischunked;
 	size_t			flen;
 	static size_t		bufsize;
 	static char		*xferbuf;
@@ -1285,10 +1283,10 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	struct authinfo 	wauth, pauth;
 	struct posinfo		pi;
 	off_t			hashbytes;
-	int			(*volatile closefunc)(FILE *);
-	FETCH			*volatile fin;
-	FILE			*volatile fout;
-	const char		*volatile penv = proxyenv;
+	int			(*closefunc)(FILE *);
+	FETCH			*fin;
+	FILE			*fout;
+	const char		*penv = proxyenv;
 	struct urlinfo		ui, oui;
 	time_t			mtime;
 	void			*ssl = NULL;
@@ -1311,9 +1309,6 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	initauthinfo(&pauth, proxyauth);
 
 	decodedpath = NULL;
-
-	if (sigsetjmp(httpabort, 1))
-		goto cleanup_fetch_url;
 
 	if (parse_url(url, "URL", &ui, &wauth) == -1)
 		goto cleanup_fetch_url;
@@ -1588,7 +1583,9 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 					/* read chunk-size */
 		if (ischunked) {
 			if (fetch_getln(xferbuf, bufsize, fin) == NULL) {
-				warnx("Unexpected EOF reading chunk-size");
+				if (!xfer_abort_p)
+					warnx("Unexpected EOF reading "
+					    "chunk-size");
 				goto cleanup_fetch_url;
 			}
 			errno = 0;
@@ -1632,7 +1629,7 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 					/* transfer file or chunk */
 		while (1) {
 			struct timeval then, now, td;
-			volatile off_t bufrem;
+			off_t bufrem;
 
 			if (rate_get)
 				(void)gettimeofday(&then, NULL);
@@ -1681,7 +1678,9 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 		if (ischunked) {
 			if (fetch_getln(xferbuf, bufsize, fin) == NULL) {
 				alarmtimer(0);
-				warnx("Unexpected EOF reading chunk CRLF");
+				if (!xfer_abort_p)
+					warnx("Unexpected EOF reading "
+					    "chunk CRLF");
 				goto cleanup_fetch_url;
 			}
 			if (strcmp(xferbuf, "\r\n") != 0) {
@@ -1756,6 +1755,7 @@ fetch_url(const char *url, const char *proxyenv, char *proxyauth, char *wwwauth)
 	FREEPTR(auth);
 	FREEPTR(location);
 	FREEPTR(message);
+	xfer_abort_p = 0;
 	return (rval);
 }
 
@@ -1769,6 +1769,7 @@ aborthttp(int notused)
 	int len;
 
 	sigint_raised = 1;
+	xfer_abort_p = 1;
 	alarmtimer(0);
 	if (fromatty) {
 		len = snprintf(msgbuf, sizeof(msgbuf),
@@ -1776,7 +1777,6 @@ aborthttp(int notused)
 		if (len > 0)
 			write(fileno(ttyout), msgbuf, len);
 	}
-	siglongjmp(httpabort, 1);
 }
 
 static void
@@ -1785,6 +1785,7 @@ timeouthttp(int notused)
 	char msgbuf[100];
 	int len;
 
+	xfer_abort_p = 1;
 	alarmtimer(0);
 	if (fromatty) {
 		len = snprintf(msgbuf, sizeof(msgbuf),
@@ -1792,7 +1793,6 @@ timeouthttp(int notused)
 		if (len > 0)
 			write(fileno(ttyout), msgbuf, len);
 	}
-	siglongjmp(httpabort, 1);
 }
 
 /*

@@ -315,6 +315,7 @@ GLOBAL	void	(*reply_callback)(const char *);
 					 */
 
 GLOBAL	volatile sig_atomic_t	sigint_raised;
+GLOBAL	volatile sig_atomic_t   xfer_abort_p;
 
 GLOBAL	FILE	*cin;
 GLOBAL	FILE	*cout;
