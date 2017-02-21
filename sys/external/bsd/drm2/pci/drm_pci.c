@@ -252,6 +252,9 @@ drm_pci_irq_install(struct drm_device *dev, irqreturn_t (*handler)(void *),
 			return -ENOENT;
 	}
 
+	pci_intr_setattr(pa->pa_pc, dev->intr_handles[0], PCI_INTR_MPSAFE,
+	    true);
+
 	intrstr = pci_intr_string(pa->pa_pc, irq_cookie->intr_handles[0],
 	    intrbuf, sizeof(intrbuf));
 	irq_cookie->ih_cookie = pci_intr_establish_xname(pa->pa_pc,
