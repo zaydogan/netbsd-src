@@ -780,6 +780,7 @@
 ./usr/include/dm.h				comp-c-include
 ./usr/include/dns_sd.h				comp-mdns-include	mdns
 ./usr/include/dwarf.h				comp-c-include
+./usr/include/efivar.h				comp-c-include
 ./usr/include/elf.h				comp-c-include
 ./usr/include/endian.h				comp-c-include
 ./usr/include/err.h				comp-c-include
@@ -3337,6 +3338,8 @@
 ./usr/lib/libdwarf_p.a				comp-c-proflib		compatfile,profile
 ./usr/lib/libedit.a				comp-c-lib		compatfile
 ./usr/lib/libedit_p.a				comp-c-proflib		compatfile,profile
+./usr/lib/libefivar.a				comp-c-lib		compatfile
+./usr/lib/libefivar_p.a				comp-c-proflib		compatfile,profile
 ./usr/lib/libelf.a				comp-c-lib		compatfile
 ./usr/lib/libelf_p.a				comp-c-proflib		compatfile,profile
 ./usr/lib/libevent.a				comp-c-lib		compatfile
@@ -14306,6 +14309,20 @@
 ./usr/share/man/html3/echochar.html		comp-c-htmlman		html
 ./usr/share/man/html3/edata.html		comp-c-htmlman		html
 ./usr/share/man/html3/editline.html		comp-c-htmlman		html
+./usr/share/man/html3/efi_append_variable.html	comp-c-htmlman		html
+./usr/share/man/html3/efi_del_variable.html	comp-c-htmlman		html
+./usr/share/man/html3/efi_get_next_variable_name.html	comp-c-htmlman		html
+./usr/share/man/html3/efi_get_variable.html	comp-c-htmlman		html
+./usr/share/man/html3/efi_get_variable_attributes.html		comp-c-htmlman		html
+./usr/share/man/html3/efi_get_variable_size.html	comp-c-htmlman		html
+./usr/share/man/html3/efi_guid_to_name.html	comp-c-htmlman		html
+./usr/share/man/html3/efi_guid_to_str.html	comp-c-htmlman		html
+./usr/share/man/html3/efi_guid_to_symbol.html	comp-c-htmlman		html
+./usr/share/man/html3/efi_name_to_guid.html	comp-c-htmlman		html
+./usr/share/man/html3/efi_set_variable.html	comp-c-htmlman		html
+./usr/share/man/html3/efi_set_variables_supported.html		comp-c-htmlman		html
+./usr/share/man/html3/efi_str_to_guid.html	comp-c-htmlman		html
+./usr/share/man/html3/efivar.html		comp-c-htmlman		html
 ./usr/share/man/html3/efopen.html		comp-c-htmlman		html
 ./usr/share/man/html3/efun.html			comp-c-htmlman		html
 ./usr/share/man/html3/el_deletestr.html		comp-c-htmlman		html
@@ -15894,6 +15911,7 @@
 ./usr/share/man/html3/libarchive_changes.html	comp-c-htmlman		html
 ./usr/share/man/html3/libarchive_internals.html comp-c-htmlman		html
 ./usr/share/man/html3/libblacklist.html		comp-c-htmlman		html
+./usr/share/man/html3/libefivar.html		comp-c-htmlman		html
 ./usr/share/man/html3/libiscsi.html		comp-c-htmlman		iscsi,html
 ./usr/share/man/html3/libmagic.html		comp-c-htmlman		html
 ./usr/share/man/html3/libmj.html		comp-c-htmlman		html
@@ -22045,6 +22063,20 @@
 ./usr/share/man/man3/echochar.3			comp-c-man		.man
 ./usr/share/man/man3/edata.3			comp-c-man		.man
 ./usr/share/man/man3/editline.3			comp-c-man		.man
+./usr/share/man/man3/efi_append_variable.3	comp-c-man		.man
+./usr/share/man/man3/efi_del_variable.3		comp-c-man		.man
+./usr/share/man/man3/efi_get_next_variable_name.3	comp-c-man		.man
+./usr/share/man/man3/efi_get_variable.3		comp-c-man		.man
+./usr/share/man/man3/efi_get_variable_attributes.3		comp-c-man		.man
+./usr/share/man/man3/efi_get_variable_size.3	comp-c-man		.man
+./usr/share/man/man3/efi_guid_to_name.3		comp-c-man		.man
+./usr/share/man/man3/efi_guid_to_str.3		comp-c-man		.man
+./usr/share/man/man3/efi_guid_to_symbol.3	comp-c-man		.man
+./usr/share/man/man3/efi_name_to_guid.3		comp-c-man		.man
+./usr/share/man/man3/efi_set_variable.3		comp-c-man		.man
+./usr/share/man/man3/efi_set_variables_supported.3		comp-c-man		.man
+./usr/share/man/man3/efi_str_to_guid.3		comp-c-man		.man
+./usr/share/man/man3/efivar.3			comp-c-man		.man
 ./usr/share/man/man3/efopen.3			comp-c-man		.man
 ./usr/share/man/man3/efun.3			comp-c-man		.man
 ./usr/share/man/man3/el_deletestr.3		comp-c-man		.man
@@ -23656,6 +23688,7 @@
 ./usr/share/man/man3/libarchive_changes.3	comp-c-man		.man
 ./usr/share/man/man3/libarchive_internals.3	comp-c-man		.man
 ./usr/share/man/man3/libblacklist.3		comp-c-man		.man
+./usr/share/man/man3/libefivar.3		comp-c-man		.man
 ./usr/share/man/man3/libiscsi.3			comp-c-man		iscsi,.man
 ./usr/share/man/man3/libmagic.3			comp-c-man		.man
 ./usr/share/man/man3/libmj.3			comp-c-man		.man

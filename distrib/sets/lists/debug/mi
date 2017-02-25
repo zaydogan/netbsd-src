@@ -56,6 +56,7 @@
 ./usr/lib/libdtrace_g.a				comp-c-debuglib		debuglib,compatfile,dtrace
 ./usr/lib/libdwarf_g.a				comp-c-debuglib		debuglib,compatfile
 ./usr/lib/libedit_g.a				comp-c-debuglib		debuglib,compatfile
+./usr/lib/libefivar_g.a				comp-c-debuglib		debuglib,compatfile
 ./usr/lib/libelf_g.a				comp-c-debuglib		debuglib,compatfile
 ./usr/lib/libevent_g.a				comp-c-debuglib		debuglib,compatfile
 ./usr/lib/libevent_openssl_g.a			comp-c-debuglib		debuglib,compatfile
@@ -1058,6 +1059,7 @@
 ./usr/libdata/debug/usr/sbin/dumpfs.debug	comp-sysutil-debug	debug
 ./usr/libdata/debug/usr/sbin/dumplfs.debug	comp-sysutil-debug	debug
 ./usr/libdata/debug/usr/sbin/edquota.debug	comp-sysutil-debug	debug
+./usr/libdata/debug/usr/sbin/efivar.debug	comp-sysutil-debug	debug
 ./usr/libdata/debug/usr/sbin/envstat.debug	comp-sysutil-debug	debug
 ./usr/libdata/debug/usr/sbin/eshconfig.debug	comp-sysutil-debug	debug
 ./usr/libdata/debug/usr/sbin/extattrctl.debug	comp-sysutil-debug	debug

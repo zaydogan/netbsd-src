@@ -273,6 +273,9 @@
 ./usr/lib/libedit.so				base-sys-shlib		compatfile
 ./usr/lib/libedit.so.3				base-sys-shlib		compatfile
 ./usr/lib/libedit.so.3.1			base-sys-shlib		compatfile
+./usr/lib/libefivar.so				base-sys-shlib		compatfile
+./usr/lib/libefivar.so.0			base-sys-shlib		compatfile
+./usr/lib/libefivar.so.0.0			base-sys-shlib		compatfile
 ./usr/lib/libelf.so				base-sys-shlib		compatfile
 ./usr/lib/libelf.so.2				base-sys-shlib		compatfile
 ./usr/lib/libelf.so.2.0				base-sys-shlib		compatfile

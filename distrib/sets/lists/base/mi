@@ -1682,6 +1682,7 @@
 ./usr/sbin/eaytest				base-obsolete		obsolete
 ./usr/sbin/editmap				base-obsolete		obsolete
 ./usr/sbin/edquota				base-sysutil-bin
+./usr/sbin/efivar				base-sysutil-bin
 ./usr/sbin/envstat				base-sysutil-bin
 ./usr/sbin/eshconfig				base-sysutil-bin
 ./usr/sbin/etcupdate				base-sysutil-bin

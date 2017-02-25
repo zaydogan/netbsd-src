@@ -37,6 +37,7 @@
 ./usr/lib/libdtrace_pic.a			comp-c-piclib		compatfile,picinstall,dtrace
 ./usr/lib/libdwarf_pic.a			comp-c-piclib		compatfile,picinstall
 ./usr/lib/libedit_pic.a				comp-c-piclib		compatfile,picinstall
+./usr/lib/libefivar_pic.a			comp-c-piclib		compatfile,picinstall
 ./usr/lib/libelf_pic.a				comp-c-piclib		compatfile,picinstall
 ./usr/lib/libevent_openssl_pic.a		comp-c-piclib		compatfile,picinstall
 ./usr/lib/libevent_pic.a			comp-c-piclib		compatfile,picinstall

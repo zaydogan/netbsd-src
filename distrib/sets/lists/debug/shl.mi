@@ -92,6 +92,7 @@
 ./usr/libdata/debug/usr/lib/libdtrace.so.3.0.debug		comp-sys-debug	debug,compatfile,dtrace
 ./usr/libdata/debug/usr/lib/libdwarf.so.2.0.debug		comp-sys-debug	debug,compatfile
 ./usr/libdata/debug/usr/lib/libedit.so.3.1.debug		comp-sys-debug	debug,compatfile
+./usr/libdata/debug/usr/lib/libefivar.so.0.0.debug		comp-sys-debug	debug,compatfile
 ./usr/libdata/debug/usr/lib/libelf.so.2.0.debug			comp-sys-debug	debug,compatfile
 ./usr/libdata/debug/usr/lib/libevent.so.4.1.debug		comp-sys-debug	debug,compatfile
 ./usr/libdata/debug/usr/lib/libevent_openssl.so.4.1.debug	comp-sys-debug	debug,compatfile

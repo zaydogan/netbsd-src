@@ -5490,6 +5490,7 @@
 ./usr/share/man/html8/dumplfs.html		man-sysutil-htmlman	html
 ./usr/share/man/html8/edquota.html		man-sysutil-htmlman	html
 ./usr/share/man/html8/eeprom.html		man-sysutil-htmlman	html
+./usr/share/man/html8/efivar.html		man-sysutil-htmlman	html
 ./usr/share/man/html8/emips/boot.html		man-sys-htmlman		html
 ./usr/share/man/html8/envstat.html		man-sysutil-htmlman	html
 ./usr/share/man/html8/error.html		man-postfix-htmlman	postfix,html
@@ -8552,6 +8553,7 @@
 ./usr/share/man/man8/editmap.8			man-obsolete		obsolete
 ./usr/share/man/man8/edquota.8			man-sysutil-man		.man
 ./usr/share/man/man8/eeprom.8			man-sysutil-man		.man
+./usr/share/man/man8/efivar.8			man-sysutil-man		.man
 ./usr/share/man/man8/emips/MAKEDEV.8		man-obsolete		obsolete
 ./usr/share/man/man8/emips/boot.8		man-sys-man		.man
 ./usr/share/man/man8/emips/installboot.8		man-obsolete		obsolete
