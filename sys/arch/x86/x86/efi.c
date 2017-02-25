@@ -436,7 +436,7 @@ efi_getbiosmemtype(uint32_t type, uint64_t attr)
 	case EFI_MD_TYPE_FIRMWARE:
 		return BIM_NVS;
 
-	case EFI_MD_TYPE_PMEM:
+	case EFI_MD_TYPE_PERSISTENT:
 		return BIM_PMEM;
 
 	case EFI_MD_TYPE_NULL:
