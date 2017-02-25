@@ -78,3 +78,4 @@ device-major nvme      char 341		   nvme
 device-major qemufwcfg char 342		   qemufwcfg
 device-major autofs    char 343		   autofs
 device-major gpiopps   char 344            gpiopps
+device-major efi       char 345		   efi

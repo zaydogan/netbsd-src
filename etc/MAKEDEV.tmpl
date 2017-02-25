@@ -240,6 +240,7 @@
 #	dpti*	DPT/Adaptec I2O RAID management interface
 #	drm*	Direct Rendering Manager interface
 #	dtv*	Digital TV interface
+#	efi	EFI Runtime accessor
 #	fb*	PMAX generic framebuffer pseudo-device
 #	fd	file descriptors
 #	gpiopps* 1PPS signals on GPIO pins
@@ -2242,6 +2243,10 @@ nvme[0-9]*)
 
 autofs)
 	mkdev autofs c %autofs_chr% 0 600
+	;;
+
+efi)
+	mkdev efi c %efi_chr% 0 600
 	;;
 
 midevend)
