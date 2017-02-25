@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2016 Netflix, Inc.
  * All rights reserved.
@@ -25,7 +27,14 @@
  */
 
 #include <sys/cdefs.h>
+#ifndef lint
+#ifdef __FreeBSD__
 __FBSDID("$FreeBSD: head/usr.sbin/efivar/efivar.c 314621 2017-03-03 20:23:18Z imp $");
+#endif
+#ifdef __NetBSD__
+__RCSID("$NetBSD$");
+#endif
+#endif	/* not lint */
 
 #include <ctype.h>
 #include <efivar.h>
@@ -391,4 +400,6 @@ main(int argc, char **argv)
 {
 
 	parse_args(argc, argv);
+
+	return 0;
 }

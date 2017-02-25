@@ -1,8 +1,12 @@
-# $FreeBSD: head/usr.sbin/efivar/Makefile 307072 2016-10-11 22:31:45Z imp $
+#	$NetBSD$
+
+.include <bsd.own.mk>
 
 PROG=	efivar
+SRCS=	efivar.c
 MAN=	efivar.8
 
-LIBADD= efivar
+DPADD+= ${LIBEFIVAR}
+LDADD+= -lefivar
 
 .include <bsd.prog.mk>
