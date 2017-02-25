@@ -22,7 +22,7 @@ SUBDIR+=	i18n_module
 
 SUBDIR+=	libarch \
 		libbluetooth libbsdmalloc libbz2 \
-		libcompat libcrypt \
+		libcompat libcrypt libefivar \
 		libintl libipsec libkvm libm \
 		libossaudio libpci libpmc libposix libprop libpthread \
 		libpuffs libresolv librmt librpcsvc librt \
