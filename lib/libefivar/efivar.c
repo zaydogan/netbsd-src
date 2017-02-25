@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2016 Netflix, Inc.
  * All rights reserved.
@@ -25,11 +27,18 @@
  */
 
 #include <sys/cdefs.h>
+#ifndef lint
+#ifdef __FreeBSD__
 __FBSDID("$FreeBSD: head/lib/libefivar/efivar.c 314623 2017-03-03 20:23:23Z imp $");
+#endif
+#ifdef __NetBSD__
+__RCSID("$NetBSD$");
+#endif
+#endif	/* not lint */
 
-#include <efivar.h>
-#include <sys/efiio.h>
 #include <sys/param.h>
+#include <sys/efiio.h>
+#include <sys/ioctl.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -92,13 +101,14 @@ efi_guid_tbl_compile(void)
 
 	if (done)
 		return;
-	for (i = 0; i < nitems(guid_tbl); i++) {
+	for (i = 0; i < __arraycount(guid_tbl); i++) {
 		uuid_from_string(guid_tbl[i].uuid_str, &guid_tbl[i].guid,
 		    &status);
 		/* all f's is a bad version, so ignore that error */
 		if (status != uuid_s_ok && status != uuid_s_bad_version)
-			fprintf(stderr, "Can't convert %s to a uuid for %s: %d\n",
-			    guid_tbl[i].uuid_str, guid_tbl[i].name, (int)status);
+			fprintf(stderr,
+			    "Can't convert %s to a uuid for %s: %d\n",
+			    guid_tbl[i].uuid_str, guid_tbl[i].name, status);
 	}
 	done = 1;
 }
@@ -108,7 +118,7 @@ efi_known_guid(struct uuid_table **tbl)
 {
 
 	*tbl = guid_tbl;
-	return (nitems(guid_tbl));
+	return __arraycount(guid_tbl);
 }
 
 static int
@@ -121,12 +131,13 @@ efi_open_dev(void)
 		efi_fd = -1;
 	else
 		efi_guid_tbl_compile();
-	return (efi_fd);
+	return efi_fd;
 }
 
 static void
 efi_var_reset(struct efi_var_ioc *var)
 {
+
 	var->name = NULL;
 	var->namesize = 0;
 	memset(&var->vendor, 0, sizeof(var->vendor));
@@ -138,11 +149,12 @@ efi_var_reset(struct efi_var_ioc *var)
 static int
 rv_to_linux_rv(int rv)
 {
+
 	if (rv == 0)
 		rv = 1;
 	else
 		rv = -errno;
-	return (rv);
+	return rv;
 }
 
 int
@@ -203,8 +215,7 @@ efi_get_variable_attributes(efi_guid_t guid, const char *name,
 }
 
 int
-efi_get_variable_size(efi_guid_t guid, const char *name,
-    size_t *size)
+efi_get_variable_size(efi_guid_t guid, const char *name, size_t *size)
 {
 
 	/* XXX check to make sure this matches the linux value */
@@ -247,8 +258,8 @@ again:
 		/*
 		 * oops, too little space. Try again.
 		 */
-		void *new = realloc(buf, buflen);
 		buflen = var.namesize;
+		void *new = realloc(buf, buflen);
 		if (new == NULL) {
 			rv = -1;
 			errno = ENOMEM;
@@ -276,7 +287,7 @@ done:
 		return 0;
 	}
 
-	return (rv_to_linux_rv(rv));
+	return rv_to_linux_rv(rv);
 }
 
 int
@@ -302,13 +313,13 @@ efi_guid_to_name(efi_guid_t *guid, char **name)
 	uint32_t status;
 
 	efi_guid_tbl_compile();
-	for (i = 0; i < nitems(guid_tbl); i++) {
+	for (i = 0; i < __arraycount(guid_tbl); i++) {
 		if (uuid_equal(guid, &guid_tbl[i].guid, &status)) {
 			*name = strdup(guid_tbl[i].name);
 			return (0);
 		}
 	}
-	return (efi_guid_to_str(guid, name));
+	return efi_guid_to_str(guid, name);
 }
 
 int
@@ -330,7 +341,7 @@ efi_guid_to_str(const efi_guid_t *guid, char **sp)
 	/* knows efi_guid_t is a typedef of uuid_t */
 	uuid_to_string(guid, sp, &status);
 
-	return (status == uuid_s_ok ? 0 : -1);
+	return status == uuid_s_ok ? 0 : -1;
 }
 
 int
@@ -339,13 +350,13 @@ efi_name_to_guid(const char *name, efi_guid_t *guid)
 	size_t i;
 
 	efi_guid_tbl_compile();
-	for (i = 0; i < nitems(guid_tbl); i++) {
+	for (i = 0; i < __arraycount(guid_tbl); i++) {
 		if (strcmp(name, guid_tbl[i].name) == 0) {
 			*guid = guid_tbl[i].guid;
-			return (0);
+			return 0;
 		}
 	}
-	return (efi_str_to_guid(name, guid));
+	return efi_str_to_guid(name, guid);
 }
 
 int
@@ -381,7 +392,7 @@ efi_str_to_guid(const char *s, efi_guid_t *guid)
 	/* knows efi_guid_t is a typedef of uuid_t */
 	uuid_from_string(s, guid, &status);
 
-	return (status == uuid_s_ok ? 0 : -1);
+	return status == uuid_s_ok ? 0 : -1;
 }
 
 int
@@ -389,4 +400,41 @@ efi_variables_supported(void)
 {
 
 	return efi_open_dev() != -1;
+}
+
+int
+efi_error_get(unsigned int n __unused, char ** const fn __unused,
+    char ** const func __unused, int *line __unused,
+    char ** const msg __unused, int *err __unused)
+{
+	/* not implemented */
+	return 0;
+}
+
+int
+efi_error_set(const char *fn __unused, const char *func __unused,
+    int line __unused, int err __unused, const char *fmt __unused, ...)
+{
+	/* not implemented */
+	return 0;
+}
+
+void
+efi_error_clear(void)
+{
+	/* not implemented */
+}
+
+int
+efi_error(const char *fmt __unused, ...)
+{
+	/* not implemented */
+	return 0;
+}
+
+int
+efi_error_val(int val __unused, const char *fmt __unused, ...)
+{
+	/* not implemented */
+	return 0;
 }

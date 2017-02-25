@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2010 Marcel Moolenaar
  * All rights reserved.
@@ -25,20 +27,20 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/libefivar/libefivar.c 307071 2016-10-11 22:30:41Z imp $");
+#ifndef lint
+__RCSID("$NetBSD$");
+#endif	/* not lint */
 
 #include <sys/types.h>
+#include <sys/efi.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/efi.h>
-#include <machine/efi.h>
 
 #include "libefivar_int.h"
-
-#include <stdio.h>
 
 /*
  * If nm were converted to utf8, what what would strlen
@@ -61,7 +63,7 @@ utf8_len_of_ucs2(const efi_char *nm)
 			len++;
 	}
 
-	return (len);
+	return len;
 }
 
 int
@@ -79,7 +81,7 @@ libefi_ucs2_to_utf8(const efi_char *nm, char **name)
 	else
 		cp = *name = malloc(sz);
 	if (*name == NULL)
-		return (ENOMEM);
+		return ENOMEM;
 
 	while (*nm) {
 		c = *nm++;
@@ -105,11 +107,11 @@ libefi_ucs2_to_utf8(const efi_char *nm, char **name)
 		/* Absent bugs, we'll never return EOVERFLOW */
 		if (freeit)
 			free(*name);
-		return (EOVERFLOW);
+		return EOVERFLOW;
 	}
 	*cp++ = '\0';
 
-	return (0);
+	return 0;
 }
 
 int
@@ -140,7 +142,7 @@ libefi_utf8_to_ucs2(const char *name, efi_char **nmp, size_t *len)
 			if (bytes != 0) {
 				if (freeit)
 					free(nm);
-				return (EILSEQ);
+				return EILSEQ;
 			}
 			if ((c & 0xf8) == 0xf0) {
 				ucs4 = c & 0x07;
@@ -163,14 +165,14 @@ libefi_utf8_to_ucs2(const char *name, efi_char **nmp, size_t *len)
 			} else if (bytes == 0) {
 				if (freeit)
 					free(nm);
-				return (EILSEQ);
+				return EILSEQ;
 			}
 		}
 		if (bytes == 0) {
 			if (ucs4 > 0xffff) {
 				if (freeit)
 					free(nm);
-				return (EILSEQ);
+				return EILSEQ;
 			}
 			*nm++ = (efi_char)ucs4;
 			sz -= 2;
@@ -179,10 +181,14 @@ libefi_utf8_to_ucs2(const char *name, efi_char **nmp, size_t *len)
 	if (sz < 2) {
 		if (freeit)
 			free(nm);
-		return (EDOOFUS);
+#ifdef EDOOFUS
+		return EDOOFUS;
+#else
+		return EINVAL;	/* XXX */
+#endif
 	}
 	sz -= 2;
 	*nm = 0;
 	*len -= sz;
-	return (0);
+	return 0;
 }

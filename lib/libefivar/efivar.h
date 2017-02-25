@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2016 Netflix, Inc.
  * All rights reserved.
@@ -48,7 +50,6 @@
 #define EFI_VARIABLE_HAS_SIGNATURE
 #endif
 
-
 typedef uuid_t efi_guid_t;
 #if BYTE_ORDER == LITTLE_ENDIAN
 #define	EFI_GUID(a, b, c, d, e0, e1, e2, e3, e4, e5)			\
@@ -82,6 +83,13 @@ int efi_set_variable(efi_guid_t guid, const char *name,
     uint8_t *data, size_t data_size, uint32_t attributes, mode_t mode);
 int efi_str_to_guid(const char *s, efi_guid_t *guid);
 int efi_variables_supported(void);
+int efi_error_get(unsigned int n, char ** const fn, char ** const func,
+ int *line, char ** const msg, int *err);
+int efi_error_set(const char *fn, const char *func, int line, int err,
+ const char *fmt, ...);
+void efi_error_clear(void);
+int efi_error(const char *fmt, ...);
+int efi_error_val(int val, const char *fmt, ...);
 
 /* FreeBSD extensions */
 struct uuid_table
@@ -94,38 +102,5 @@ struct uuid_table
 int efi_known_guid(struct uuid_table **);
 
 extern const efi_guid_t efi_guid_empty;
-
-/* Stubs that are expected, but aren't really used */
-static inline int
-efi_error_get(unsigned int n __unused, char ** const fn __unused,
-    char ** const func __unused, int *line __unused,
-    char ** const msg __unused, int *err __unused)
-{
-	return 0;
-}
-
-static inline int
-efi_error_set(const char *fn __unused, const char *func __unused,
-    int line __unused, int err __unused, const char *fmt __unused, ...)
-{
-	return 0;
-}
-
-static inline void
-efi_error_clear(void)
-{
-}
-
-static inline int
-efi_error(const char *fmt __unused, ...)
-{
-	return 0;
-}
-
-static inline int
-efi_error_val(int val __unused, const char *fmt __unused, ...)
-{
-	return 0;
-}
 
 #endif /* _EFIVAR_H_ */
