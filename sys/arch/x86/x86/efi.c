@@ -33,11 +33,13 @@ __KERNEL_RCSID(0, "$NetBSD: efi.c,v 1.15 2018/05/19 17:18:57 jakllsch Exp $");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/uuid.h>
+#include <sys/conf.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <machine/bootinfo.h>
 #include <x86/efi.h>
+#include <sys/efiio.h>
 
 #include <dev/mm.h>
 #include <dev/pci/pcivar.h> /* for pci_mapreg_map_enable_decode */
@@ -61,6 +63,13 @@ static struct efi_e820memmap {
 	struct btinfo_memmap bim;
 	struct bi_memmap_entry entry[VM_PHYSSEG_MAX - 1];
 } efi_e820memmap;
+
+void efiattach(int);
+void
+efiattach(int n)
+{
+	/* nothing */
+}
 
 /*
  * Map a physical address (PA) to a newly allocated virtual address (VA).
@@ -548,4 +557,64 @@ efi_get_e820memmap(void)
 	    (intptr_t)&efi_e820memmap.bim.entry[n] - (intptr_t)&efi_e820memmap;
 	efi_e820memmap.bim.common.type = BTINFO_MEMMAP;
 	return &efi_e820memmap.bim;
+}
+
+/*
+ * ioctl
+ */
+
+dev_type_open(efiopen);
+dev_type_close(eficlose);
+dev_type_ioctl(efiioctl);
+
+const struct cdevsw efi_cdevsw = {
+	.d_open = efiopen,
+	.d_close = eficlose,
+	.d_read = noread,
+	.d_write = nowrite,
+	.d_ioctl = efiioctl,
+	.d_stop = nostop,
+	.d_tty = notty,
+	.d_poll = nopoll,
+	.d_mmap = nommap,
+	.d_kqfilter = nokqfilter,
+	.d_discard = nodiscard,
+	.d_flag = D_OTHER,
+};
+
+int
+efiopen(dev_t dev, int flag, int mode, struct lwp *l)
+{
+
+	if (minor(dev) != 0)
+		return ENXIO;
+
+	if (!efi_probe())
+		return ENXIO;
+
+	return 0;
+}
+
+int
+eficlose(dev_t dev, int flag, int mode, struct lwp *l)
+{
+
+	return 0;
+}
+
+int
+efiioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+{
+	int error;
+
+	switch (cmd) {
+	case EFIIOC_VAR_GET:
+	case EFIIOC_VAR_NEXT:
+	case EFIIOC_VAR_SET:
+	default:
+		error = ENOTTY;
+		break;
+	}
+
+	return error;
 }

@@ -163,3 +163,5 @@ file	arch/x86/pci/pciide_machdep.c	pciide_common
 
 file	arch/x86/pci/pci_bus_fixup.c	pci_bus_fixup
 file	arch/x86/pci/pci_addr_fixup.c	pci_addr_fixup
+
+defpseudo efi
