@@ -35,9 +35,11 @@ __KERNEL_RCSID(0, "$NetBSD: efi.c,v 1.15 2018/05/19 17:18:57 jakllsch Exp $");
 #include <sys/uuid.h>
 #include <sys/conf.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <machine/bootinfo.h>
+#include <machine/pmap.h>
+
 #include <x86/efi.h>
 #include <sys/efiio.h>
 
@@ -52,6 +54,13 @@ const struct uuid EFI_UUID_SMBIOS3 = EFI_TABLE_SMBIOS3;
 static vaddr_t 	efi_getva(paddr_t);
 static void 	efi_relva(vaddr_t);
 struct efi_cfgtbl *efi_getcfgtblhead(void);
+struct efi_rt	*efi_getrt(void);
+#ifdef __x86_64__
+paddr_t		efi_make_tmp_pgtbl(void);
+void		efi_free_tmp_pgtbl(void);
+pt_entry_t	*efi_get_pte_tmp_pgtbl(paddr_t, vaddr_t);
+bool		efi_set_virtual_address_map(struct efi_rt *);
+#endif
 void 		efi_aprintcfgtbl(void);
 void 		efi_aprintuuid(const struct uuid *);
 bool 		efi_uuideq(const struct uuid *, const struct uuid *);
@@ -59,6 +68,7 @@ bool 		efi_uuideq(const struct uuid *, const struct uuid *);
 static bool efi_is32x64 = false;
 static struct efi_systbl *efi_systbl_va = NULL;
 static struct efi_cfgtbl *efi_cfgtblhead_va = NULL;
+static struct efi_rt *efi_rt_va = NULL;
 static struct efi_e820memmap {
 	struct btinfo_memmap bim;
 	struct bi_memmap_entry entry[VM_PHYSSEG_MAX - 1];
@@ -161,7 +171,7 @@ efi_getcfgtblhead(void)
 		return efi_cfgtblhead_va;
 
 	if (efi_is32x64) {
-#if defined(__amd64__)
+#if defined(__x86_64__)
 		struct efi_systbl32 *systbl32 = (void *) efi_systbl_va;
 		pa = systbl32->st_cfgtbl;
 #elif defined(__i386__)
@@ -191,7 +201,7 @@ efi_aprintcfgtbl(void)
 	unsigned long count;
 
 	if (efi_is32x64) {
-#if defined(__amd64__)
+#if defined(__x86_64__)
 		struct efi_systbl32 *systbl32 = (void *) efi_systbl_va;
 		struct efi_cfgtbl32 *ct32 = (void *) efi_cfgtblhead_va;
 
@@ -254,7 +264,7 @@ efi_getcfgtblpa(const struct uuid * uuid)
 	unsigned long count;
 
 	if (efi_is32x64) {
-#if defined(__amd64__)
+#if defined(__x86_64__)
 		struct efi_systbl32 *systbl32 = (void *) efi_systbl_va;
 		struct efi_cfgtbl32 *ct32 = (void *) efi_cfgtblhead_va;
 
@@ -296,14 +306,14 @@ efi_getsystblpa(void)
 		/* Unable to locate the EFI System Table. */
 		return 0;
 	}
-	if (sizeof(paddr_t) == 4 &&	/* XXX i386 with PAE */
+	if (sizeof(vaddr_t) == 4 &&
 	    (bi->systblpa & 0xffffffff00000000ULL)) {
 		/* Unable to access EFI System Table. */
 		return 0;
 	}
 	if (bi->common.len > 16 && (bi->flags & BI_EFI_32BIT)) {
 		/* boot from 32bit UEFI */
-#if defined(__amd64__)
+#if defined(__x86_64__)
 		efi_is32x64 = true;
 #endif
 	} else {
@@ -339,7 +349,7 @@ efi_getsystbl(void)
 	aprint_debug("efi: systbl mapped at va %" PRIxVADDR "\n", va);
 
 	if (efi_is32x64) {
-#if defined(__amd64__)
+#if defined(__x86_64__)
 		struct efi_systbl32 *systbl32 = (struct efi_systbl32 *) va;
 
 		/* XXX Check the signature and the CRC32 */
@@ -399,6 +409,337 @@ efi_getsystbl(void)
 }
 
 /*
+ * Return a pointer to the EFI Runtime Service.
+ */
+struct efi_rt *
+efi_getrt(void)
+{
+#ifdef __x86_64__
+	vaddr_t va;
+#endif
+
+	if (efi_rt_va != NULL)
+		return efi_rt_va;
+
+#ifdef __x86_64__
+	if (efi_is32x64)	/* XXX */
+		return NULL;
+
+	va = efi_getva((paddr_t)efi_getsystbl()->st_rt);
+	if (va == 0)
+		return NULL;
+
+	if (!efi_set_virtual_address_map((void *)va)) {
+		efi_relva(va);
+		return NULL;
+	}
+
+	efi_rt_va = (void *)va;
+#endif
+	return efi_rt_va;
+}
+
+#ifdef __x86_64__
+#if PTP_LEVELS > 4
+#error "Unsupported number of page table mappings"
+#endif
+
+struct pglist efi_pgtbl_list;
+struct pglist efi_pgtbl_free;
+bool efi_do_set_virtual_address_map;
+
+static int
+alloc_pgfree(void)
+{
+	const int allocpg = 256;
+
+	return uvm_pglistalloc(allocpg * PAGE_SIZE, 0, ptoa(physmem), 0, 0,
+	    &efi_pgtbl_free, allocpg, 0);
+}
+
+/**
+ * from x86/x86/pmap.c:pmap_init_tmp_pgtbl()
+ */
+paddr_t
+efi_make_tmp_pgtbl(void)
+{
+	extern const vaddr_t ptp_masks[];
+	extern const int ptp_shifts[];
+	pd_entry_t *tmp_pml, *kernel_pml;
+	paddr_t pgpa, endpa;
+	vaddr_t pgva;
+	int i, error, pgsz;
+
+	/* map PA=VA 0-4GB */
+	pgsz = 0;
+	pgsz += 1;	/* PML4 (256TiB) */
+	pgsz += 1;	/* PDP (512GiB) */
+	pgsz += 4;	/* PD (1GiB) */
+	endpa = ptoa(physmem);
+	if (endpa > 4ULL * 1024 * 1024 * 1024)
+		endpa = 4ULL * 1024 * 1024 * 1024;
+	error = uvm_pglistalloc(pgsz * PAGE_SIZE, 0, endpa - pgsz * PAGE_SIZE,
+	    0, 0, &efi_pgtbl_list, 1, 0);
+	if (error) {
+		aprint_error("efi: uvm_pglistalloc failed\n");
+		return 0;
+	}
+
+	const struct vm_page * const pg = TAILQ_FIRST(&efi_pgtbl_list);
+	KASSERT(pg != NULL);
+	pgpa = VM_PAGE_TO_PHYS(pg);
+
+	pgva = PMAP_DIRECT_MAP(pgpa);
+
+	/* Copy PML4 */
+	kernel_pml = pmap_kernel()->pm_pdir;
+	tmp_pml = (void *)pgva;
+	memcpy(tmp_pml, kernel_pml, PAGE_SIZE);
+
+	/* Zero levels 2-3 */
+	for (i = 1; i < pgsz; i++) {
+		tmp_pml = (void *)(pgva + i * PAGE_SIZE);
+		memset(tmp_pml, 0, PAGE_SIZE);
+	}
+
+	/* PDP at PML4 */
+	tmp_pml = (void *)pgva;
+	tmp_pml[pl_i(pgpa, 4)] = ((pgpa + PAGE_SIZE) & PG_FRAME) | PG_RW | PG_V;
+
+	/* PD at PDP */
+	tmp_pml = (void *)(pgva + PAGE_SIZE);
+	for (i = 2; i < pgsz; i++) {
+		tmp_pml[pl_i(pgpa, 3)] =
+		    ((pgpa + i * PAGE_SIZE) & PG_FRAME) | PG_RW | PG_V;
+	}
+
+	error = alloc_pgfree();
+	if (error) {
+		aprint_error("efi: couldn't allocate page table page\n");
+		uvm_pglistfree(&efi_pgtbl_list);
+		return 0;
+	}
+
+	return pgpa;
+}
+
+void
+efi_free_tmp_pgtbl(void)
+{
+
+	uvm_pglistfree(&efi_pgtbl_list);
+	uvm_pglistfree(&efi_pgtbl_free);
+}
+
+static struct vm_page *
+get_page_from_free_list(void)
+{
+	struct vm_page *pg;
+	int error;
+
+	pg = TAILQ_FIRST(&efi_pgtbl_free);
+	if (pg == NULL) {
+		error = alloc_pgfree();
+		if (error)
+			panic("efi: couldn't allocate page table page\n");
+		pg = TAILQ_FIRST(&efi_pgtbl_free);
+	}
+	KASSERT(pg != NULL);
+	TAILQ_REMOVE(&efi_pgtbl_free, pg, pageq.queue);
+	TAILQ_INSERT_TAIL(&efi_pgtbl_list, pg, pageq.queue);
+	memset((void *)PMAP_DIRECT_MAP(VM_PAGE_TO_PHYS(pg)), 0, PAGE_SIZE);
+	return pg;
+}
+
+pt_entry_t *
+efi_get_pte_tmp_pgtbl(paddr_t pgtbl_pa, vaddr_t va)
+{
+	pd_entry_t *pml4e, *pdpe, *pde;
+	pt_entry_t *pte;
+	struct vm_page *pg;
+	paddr_t pa;
+
+	pml4e = (void *)PMAP_DIRECT_MAP(pgtbl_pa);
+	pml4e = &pml4e[pl4_pi(va)];
+	if (*pml4e == 0) {
+		pg = get_page_from_free_list();
+		pa = VM_PAGE_TO_PHYS(pg);
+		*pml4e = pa | PG_RW | PG_V;
+	} else
+		pa = *pml4e & ~PAGE_MASK;
+
+	pdpe = (void *)PMAP_DIRECT_MAP(pa);
+	pdpe = &pdpe[pl3_pi(va)];
+	if (*pdpe == 0) {
+		pg = get_page_from_free_list();
+		pa = VM_PAGE_TO_PHYS(pg);
+		*pdpe = pa | PG_RW | PG_V;
+	} else
+		pa = *pdpe & ~PAGE_MASK;
+
+	pde = (void *)PMAP_DIRECT_MAP(pa);
+	pde = &pde[pl2_pi(va)];
+	if (*pde == 0) {
+		pg = get_page_from_free_list();
+		pa = VM_PAGE_TO_PHYS(pg);
+		*pde = pa | PG_RW | PG_V;
+	} else
+		pa = *pde & ~PAGE_MASK;
+
+	pte = (void *)PMAP_DIRECT_MAP(pa);
+	pte = &pte[pl1_pi(va)];
+	KASSERT(*pte == 0);
+
+	return pte;
+}
+
+bool
+efi_set_virtual_address_map(struct efi_rt *rt)
+{
+	efi_status status;
+	struct btinfo_efimemmap *efimm;
+	struct efi_md *md;
+	paddr_t pa;
+	vaddr_t va;
+	u_long descsz, allocsz;
+	u_long orig_cr3, tmp_cr3;
+	pt_entry_t *pte;
+	int i, flags;
+
+	if (efi_do_set_virtual_address_map)
+		return false;
+
+	efi_do_set_virtual_address_map = true;
+
+	efimm = lookup_bootinfo(BTINFO_EFIMEMMAP);
+	KASSERT(efimm != NULL);
+
+	descsz = efimm->size;
+	allocsz = efimm->size * efimm->num;
+	for (i = 0, md = (struct efi_md *)efimm->memmap;
+	     i < efimm->num;
+	     i++, md = efi_next_descriptor(md, descsz)) {
+		if (!(md->md_attr & EFI_MD_ATTR_RT))
+			continue;
+
+		if (md->md_virt != 0) {
+			aprint_verbose(
+			    "efi: EFI Runtime entry %d is mapped\n", i);
+			goto fail;
+		}
+		if ((md->md_phys & EFI_PAGE_MASK) != 0) {
+			aprint_verbose(
+			    "efi: EFI Runtime entry %d is not aligned\n", i);
+			goto fail;
+		}
+
+		va = uvm_km_alloc(kernel_map, md->md_pages * EFI_PAGE_SIZE,
+		    0, UVM_KMF_VAONLY);
+		if (va == 0) {
+			aprint_error("efi: couldn't allocate entry %d va\n", i);
+			goto fail;
+		}
+		md->md_virt = va;
+
+		flags = 0;
+		if ((md->md_attr & EFI_MD_ATTR_WB))
+			flags |= PMAP_WRITE_BACK;
+		else if ((md->md_attr & EFI_MD_ATTR_WT))
+			;
+		else if ((md->md_attr & EFI_MD_ATTR_WC))
+			flags |= PMAP_WRITE_COMBINE;
+		else if ((md->md_attr & EFI_MD_ATTR_WP))
+			;
+		else if ((md->md_attr & EFI_MD_ATTR_UC))
+			flags |= PMAP_NOCACHE;
+		else {
+			aprint_verbose("efi: EFI Runtime entry %d mapping "
+			    "attributes unsupported\n", i);
+			flags |= PMAP_NOCACHE;
+		}
+
+		for (pa = (paddr_t)md->md_phys;
+		    pa < (paddr_t)md->md_phys + md->md_pages * EFI_PAGE_SIZE;
+		    pa += PAGE_SIZE, va += PAGE_SIZE)
+			pmap_kenter_pa(va, pa, VM_PROT_DEFAULT, flags);
+	}
+	pmap_update(pmap_kernel());
+
+	/* make VA=PA page table */
+	tmp_cr3 = efi_make_tmp_pgtbl();
+	if (tmp_cr3 == 0)
+		goto fail;
+
+	for (i = 0, md = (struct efi_md *)efimm->memmap;
+	     i < efimm->num;
+	     i++, md = efi_next_descriptor(md, descsz)) {
+		if (!(md->md_attr & EFI_MD_ATTR_RT))
+			continue;
+
+		flags = 0;
+		if ((md->md_attr & EFI_MD_ATTR_WB))
+			;
+		else if ((md->md_attr & EFI_MD_ATTR_WT))
+			flags |= PG_WT;
+		else if ((md->md_attr & EFI_MD_ATTR_WC))
+			;
+		else if ((md->md_attr & EFI_MD_ATTR_WP))
+			;
+		else if ((md->md_attr & EFI_MD_ATTR_UC))
+			flags |= PG_N;
+		else
+			flags |= PG_N;
+
+		for (pa = (paddr_t)md->md_phys;
+		    pa < (paddr_t)md->md_phys + md->md_pages * EFI_PAGE_SIZE;
+		    pa += PAGE_SIZE) {
+			/* VA=PA */
+			pte = efi_get_pte_tmp_pgtbl(tmp_cr3, (vaddr_t)pa);
+			*pte = pa | PG_RW | PG_V | flags;
+		}
+	}
+
+	x86_disable_intr();
+	orig_cr3 = rcr3();
+	wbinvd();
+	x86_flush();
+	lcr3(tmp_cr3);
+	tlbflushg();
+
+	status = rt->rt_setvirtual(allocsz, descsz, efimm->version,
+	    (struct efi_md *)efimm->memmap);
+
+	lcr3(orig_cr3);
+	tlbflushg();
+	x86_enable_intr();
+
+	efi_free_tmp_pgtbl();
+
+	if (status != 0) {
+		aprint_error("efi: SetVirtualAddressMap failed: %lx(%d)\n",
+		    status, efi_status_to_errno(status));
+		goto fail;
+	}
+
+	return true;
+
+fail:
+	while (--i >= 0) {
+		md = (void *)((uint8_t *)md - descsz);
+		if (!(md->md_attr & EFI_MD_ATTR_RT))
+			continue;
+		va = (vaddr_t)md->md_virt;
+		pmap_kremove(va, md->md_pages * EFI_PAGE_SIZE);
+		uvm_km_free(kernel_map, va, md->md_pages * EFI_PAGE_SIZE,
+		    UVM_KMF_VAONLY);
+		md->md_virt = 0;
+	}
+	pmap_update(pmap_kernel());
+	return false;
+}
+#endif
+
+/*
  * EFI is available if we are able to locate the EFI System Table.
  */
 void
@@ -416,6 +757,8 @@ efi_init(void)
 		bootmethod_efi = false;
 		return;
 	}
+	if (efi_getrt() == NULL)
+		aprint_debug("efi: missing or invalid runtime service\n");
 	bootmethod_efi = true;
 	pci_mapreg_map_enable_decode = true; /* PR port-amd64/53286 */
 }
