@@ -64,11 +64,18 @@ bool		efi_set_virtual_address_map(struct efi_rt *);
 void 		efi_aprintcfgtbl(void);
 void 		efi_aprintuuid(const struct uuid *);
 bool 		efi_uuideq(const struct uuid *, const struct uuid *);
+int		efi_status_to_errno(efi_status);
+int		efi_var_get(efi_char *, struct uuid *, uint32_t *, size_t *,
+		    void *);
+int		efi_var_nextname(size_t *, efi_char *, struct uuid *);
+int		efi_var_set(efi_char *, struct uuid *, uint32_t, size_t,
+		    void *);
 
 static bool efi_is32x64 = false;
 static struct efi_systbl *efi_systbl_va = NULL;
 static struct efi_cfgtbl *efi_cfgtblhead_va = NULL;
 static struct efi_rt *efi_rt_va = NULL;
+static kmutex_t efi_lock;
 static struct efi_e820memmap {
 	struct btinfo_memmap bim;
 	struct bi_memmap_entry entry[VM_PHYSSEG_MAX - 1];
@@ -343,6 +350,8 @@ efi_getsystbl(void)
 	pa = efi_getsystblpa();
 	if (pa == 0)
 		return NULL;
+
+	mutex_init(&efi_lock, MUTEX_DEFAULT, IPL_NONE);
 
 	aprint_normal("efi: systbl at pa %" PRIxPADDR "\n", pa);
 	va = efi_getva(pa);
@@ -902,17 +911,122 @@ efi_get_e820memmap(void)
 	return &efi_e820memmap.bim;
 }
 
+static const int efi_status2err[25] = {
+	0,		/* EFI_SUCCESS */
+	ENOEXEC,	/* EFI_LOAD_ERROR */
+	EINVAL,		/* EFI_INVALID_PARAMETER */
+	ENOSYS,		/* EFI_UNSUPPORTED */
+	EMSGSIZE, 	/* EFI_BAD_BUFFER_SIZE */
+	EOVERFLOW,	/* EFI_BUFFER_TOO_SMALL */
+	EBUSY,		/* EFI_NOT_READY */
+	EIO,		/* EFI_DEVICE_ERROR */
+	EROFS,		/* EFI_WRITE_PROTECTED */
+	EAGAIN,		/* EFI_OUT_OF_RESOURCES */
+	EIO,		/* EFI_VOLUME_CORRUPTED */
+	ENOSPC,		/* EFI_VOLUME_FULL */
+	ENXIO,		/* EFI_NO_MEDIA */
+	ESTALE,		/* EFI_MEDIA_CHANGED */
+	ENOENT,		/* EFI_NOT_FOUND */
+	EACCES,		/* EFI_ACCESS_DENIED */
+	ETIMEDOUT,	/* EFI_NO_RESPONSE */
+	EADDRNOTAVAIL,	/* EFI_NO_MAPPING */
+	ETIMEDOUT,	/* EFI_TIMEOUT */
+	EINVAL,		/* EFI_NOT_STARTED */
+	EALREADY,	/* EFI_ALREADY_STARTED */
+	ECANCELED,	/* EFI_ABORTED */
+	EPROTO,		/* EFI_ICMP_ERROR */
+	EPROTO,		/* EFI_TFTP_ERROR */
+	EPROTO		/* EFI_PROTOCOL_ERROR */
+};
+
+int
+efi_status_to_errno(efi_status status)
+{
+	u_long code;
+
+	code = status & ~__BIT((sizeof(u_long) * CHAR_BIT) - 1);
+	if (code < __arraycount(efi_status2err))
+		return efi_status2err[code];
+	return EINVAL;
+}
+
+int
+efi_var_get(efi_char *name, struct uuid *vendor, uint32_t *attrib,
+    size_t *datasz, void *data)
+{
+	u_long sz = (u_long)*datasz;
+	efi_status status;
+	int s;
+
+	if (efi_rt_va == NULL)
+		return ENXIO;
+
+	mutex_enter(&efi_lock);
+
+	s = splhigh();
+	status = efi_rt_va->rt_getvar(name, vendor, attrib, &sz, data);
+	splx(s);
+
+	mutex_exit(&efi_lock);
+
+	*datasz = sz;
+	return efi_status_to_errno(status);
+}
+
+int
+efi_var_nextname(size_t *namesz, efi_char *name, struct uuid *vendor)
+{
+	u_long sz = (u_long)*namesz;
+	efi_status status;
+	int s;
+
+	if (efi_rt_va == NULL)
+		return ENXIO;
+
+	mutex_enter(&efi_lock);
+
+	s = splhigh();
+	status = efi_rt_va->rt_scanvar(&sz, name, vendor);
+	splx(s);
+
+	mutex_exit(&efi_lock);
+
+	*namesz = sz;
+	return efi_status_to_errno(status);
+}
+
+int
+efi_var_set(efi_char *name, struct uuid *vendor, uint32_t attrib,
+    size_t datasz, void *data)
+{
+	u_long sz = (u_long)datasz;
+	efi_status status;
+	int s;
+
+	if (efi_rt_va == NULL)
+		return ENXIO;
+
+	mutex_enter(&efi_lock);
+
+	s = splhigh();
+	status = efi_rt_va->rt_setvar(name, vendor, attrib, sz, data);
+	splx(s);
+
+	mutex_exit(&efi_lock);
+
+	return efi_status_to_errno(status);
+}
+
 /*
  * ioctl
  */
 
 dev_type_open(efiopen);
-dev_type_close(eficlose);
 dev_type_ioctl(efiioctl);
 
 const struct cdevsw efi_cdevsw = {
 	.d_open = efiopen,
-	.d_close = eficlose,
+	.d_close = noclose,
 	.d_read = noread,
 	.d_write = nowrite,
 	.d_ioctl = efiioctl,
@@ -929,19 +1043,8 @@ int
 efiopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 
-	if (minor(dev) != 0)
+	if (lookup_bootinfo(BTINFO_EFI) == NULL)
 		return ENXIO;
-
-	if (!efi_probe())
-		return ENXIO;
-
-	return 0;
-}
-
-int
-eficlose(dev_t dev, int flag, int mode, struct lwp *l)
-{
-
 	return 0;
 }
 
@@ -951,9 +1054,125 @@ efiioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	int error;
 
 	switch (cmd) {
+	case EFIIOC_RUNTIME:
+		if (efi_rt_va == NULL)
+			*(int *)data = 0;
+		else if (!efi_is32x64)
+			*(int *)data = sizeof(vaddr_t) == 4 ? 32 : 64;
+		else
+			*(int *)data = sizeof(vaddr_t) == 4 ? 64 : 32;
+		error = 0;
+		break;
+
 	case EFIIOC_VAR_GET:
+	{
+		struct efi_var_ioc *evi = data;
+		size_t datasz = evi->datasize;
+		void *vardata;
+		efi_char *name;
+
+		vardata = kmem_alloc(datasz, KM_SLEEP);
+		if (vardata == NULL)
+			return ENOMEM;
+		name = kmem_alloc(evi->namesize, KM_SLEEP);
+		if (name == NULL) {
+			kmem_free(vardata, datasz);
+			return ENOMEM;
+		}
+		error = copyin(evi->name, name, evi->namesize);
+		if (error)
+			goto var_get_out;
+		if (name[evi->namesize / sizeof(efi_char) - 1] != '\0') {
+			error = EINVAL;
+			goto var_get_out;
+		}
+
+		error = efi_var_get(name, &evi->vendor, &evi->attrib,
+		    &evi->datasize, vardata);
+
+		if (error == 0)
+			error = copyout(vardata, evi->data, evi->datasize);
+		else if (error == EOVERFLOW) {
+			/*
+			 * Pass back the size we really need, but
+			 * convert the error to 0 so the copyout
+			 * happens. datasize was updated in the
+			 * efi_var_get call.
+			 */
+			evi->data = NULL;
+			error = 0;
+		}
+var_get_out:
+		kmem_free(vardata, datasz);
+		kmem_free(name, evi->namesize);
+		break;
+	}
+
 	case EFIIOC_VAR_NEXT:
+	{
+		struct efi_var_ioc *evi = data;
+		size_t namesz = evi->namesize;
+		efi_char *name;
+
+		name = kmem_alloc(namesz, KM_SLEEP);
+		if (name == NULL)
+			return ENOMEM;
+		error = copyin(evi->name, name, namesz);
+		if (error)
+			goto var_next_out;
+
+		error = efi_var_nextname(&evi->namesize, name, &evi->vendor);
+
+		if (error == 0)
+			error = copyout(name, evi->name, evi->namesize);
+		else if (error == EOVERFLOW) {
+			evi->name = NULL;
+			error = 0;
+		}
+var_next_out:
+		kmem_free(name, namesz);
+		break;
+	}
+
 	case EFIIOC_VAR_SET:
+	{
+		struct efi_var_ioc *evi = data;
+		void *vardata = NULL;
+		efi_char *name;
+
+		/* datasize == 0 -> delete (more or less) */
+		if (evi->datasize > 0) {
+			vardata = kmem_alloc(evi->datasize, KM_SLEEP);
+			if (vardata == NULL)
+				return ENOMEM;
+		}
+		name = kmem_alloc(evi->namesize, KM_SLEEP);
+		if (name == NULL) {
+			kmem_free(vardata, evi->datasize);
+			return ENOMEM;
+		}
+		if (evi->datasize > 0) {
+			error = copyin(evi->data, vardata, evi->datasize);
+			if (error)
+				goto var_set_out;
+		}
+		error = copyin(evi->name, name, evi->namesize);
+		if (error)
+			goto var_set_out;
+		if (name[evi->namesize / sizeof(efi_char) - 1] != '\0') {
+			error = EINVAL;
+			goto var_set_out;
+		}
+
+		error = efi_var_set(name, &evi->vendor, evi->attrib,
+		    evi->datasize, vardata);
+var_set_out:
+		if (vardata != NULL)
+			kmem_free(vardata, evi->datasize);
+		kmem_free(name, evi->namesize);
+		break;
+	}
+
 	default:
 		error = ENOTTY;
 		break;
