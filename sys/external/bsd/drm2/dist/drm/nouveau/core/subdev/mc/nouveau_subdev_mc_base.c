@@ -188,7 +188,7 @@ nouveau_mc_create_(struct nouveau_object *parent, struct nouveau_object *engine,
 #if defined (__arm__)
 	} else {
 		pmc->irq_cookie = intr_establish(TEGRA_INTR_GPU,
-		    IPL_VM, IST_LEVEL, nouveau_mc_intr, pmc);
+		    IPL_SCHED, IST_LEVEL, nouveau_mc_intr, pmc);
 		if (pmc->irq_cookie == NULL)
 			return -EIO;
 #endif

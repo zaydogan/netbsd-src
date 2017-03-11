@@ -123,8 +123,8 @@ typedef struct linux_rwlock {
 static inline void
 rwlock_init(rwlock_t *rw)
 {
-
-	mutex_init(&rw->rw_lock, MUTEX_DEFAULT, IPL_VM);
+	/* XXX What's the right IPL?  IPL_VM...?  */
+	mutex_init(&rw->rw_lock, MUTEX_DEFAULT, IPL_SCHED);
 	rw->rw_nreaders = 0;
 }
 
