@@ -239,9 +239,11 @@ drm_pci_irq_install(struct drm_device *dev, irqreturn_t (*handler)(void *),
 	const char *intrstr;
 	char intrbuf[PCI_INTRSTR_LEN];
 	struct drm_bus_irq_cookie *irq_cookie;
+	pcireg_t reg;
 
 	irq_cookie = kmem_alloc(sizeof(*irq_cookie), KM_SLEEP);
 
+	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	if (dev->pdev->msi_enabled) {
 		if (dev->pdev->intr_handles == NULL) {
 			if (pci_msi_alloc_exact(pa, &irq_cookie->intr_handles,
@@ -254,13 +256,16 @@ drm_pci_irq_install(struct drm_device *dev, irqreturn_t (*handler)(void *),
 			irq_cookie->intr_handles = dev->pdev->intr_handles;
 			dev->pdev->intr_handles = NULL;
 		}
+		SET(reg, PCI_COMMAND_INTERRUPT_DISABLE);
 	} else {
 		if (pci_intx_alloc(pa, &irq_cookie->intr_handles)) {
 			aprint_error_dev(dev->dev,
 			    "couldn't allocate INTx interrupt (%s)\n", name);
 			goto error;
 		}
+		CLR(reg, PCI_COMMAND_INTERRUPT_DISABLE);
 	}
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, reg);
 
 	intrstr = pci_intr_string(pa->pa_pc, irq_cookie->intr_handles[0],
 	    intrbuf, sizeof(intrbuf));
