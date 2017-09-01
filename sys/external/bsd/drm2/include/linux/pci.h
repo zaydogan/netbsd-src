@@ -293,7 +293,6 @@ pci_write_config_byte(struct pci_dev *pdev, int reg, uint8_t value)
 static inline int
 pci_enable_msi(struct pci_dev *pdev)
 {
-#ifdef notyet
 	const struct pci_attach_args *const pa = &pdev->pd_pa;
 
 	if (pci_msi_alloc_exact(pa, &pdev->intr_handles, 1))
@@ -301,9 +300,6 @@ pci_enable_msi(struct pci_dev *pdev)
 
 	pdev->msi_enabled = 1;
 	return 0;
-#else
-	return -ENOSYS;
-#endif
 }
 
 static inline void
