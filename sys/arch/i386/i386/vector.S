@@ -85,6 +85,9 @@ __KERNEL_RCSID(0, "$NetBSD: vector.S,v 1.78 2018/07/14 14:29:40 maxv Exp $");
 
 #include "ioapic.h"
 #include "lapic.h"
+#ifndef XEN
+#include "hyperv.h"
+#endif
 
 #include "assym.h"
 
@@ -317,6 +320,45 @@ IDTVEC(resume_lapic_ltimer)
 	orl	$(1 << LIR_TIMER),CPUVAR(IPENDING)
 	INTRFASTEXIT
 IDTVEC_END(resume_lapic_ltimer)
+
+#if NHYPERV > 0
+	/*
+	 * Hyper-V event channel upcall interrupt handler.
+	 * Only used when the hypervisor supports direct vector callbacks.
+	 */
+IDTVEC(recurse_hyperv_upcall)
+	INTR_RECURSE_HWFRAME
+	pushl	$0
+	pushl	$T_ASTFLT
+	INTRENTRY
+	jmp	1f
+IDTVEC_END(recurse_hyperv_upcall)
+IDTVEC(intr_hyperv_upcall)
+	pushl	$0
+	pushl	$T_ASTFLT
+	INTRENTRY
+	movl	CPUVAR(ILEVEL),%ebx
+	cmpl	$IPL_NET,%ebx
+	jae	2f
+	jmp	1f
+IDTVEC_END(intr_hyperv_upcall)
+IDTVEC(resume_hyperv_upcall)
+1:
+	pushl	%ebx
+	IDEPTH_INCR
+	movl	$IPL_NET,CPUVAR(ILEVEL)
+	sti
+	pushl	%esp
+	call	_C_LABEL(hyperv_intr)
+	addl	$4,%esp
+	cli
+	jmp	_C_LABEL(Xdoreti)
+2:
+	orl	$(1 << LIR_HYPERV),CPUVAR(IPENDING)
+	INTRFASTEXIT
+IDTVEC_END(resume_hyperv_upcall)
+#endif	/* NHYPERV > 0 */
+
 #endif /* NLAPIC > 0 */
 
 

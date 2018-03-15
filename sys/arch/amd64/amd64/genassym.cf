@@ -315,11 +315,13 @@ define	IS_LWP			offsetof(struct intrsource, is_lwp)
 
 define	IPL_NONE		IPL_NONE
 define	IPL_PREEMPT		IPL_PREEMPT
+define	IPL_NET			IPL_NET
 define	IPL_CLOCK		IPL_CLOCK
 define	IPL_HIGH		IPL_HIGH
 
 define	LIR_IPI			LIR_IPI
 define	LIR_TIMER		LIR_TIMER
+define	LIR_HYPERV		LIR_HYPERV
 
 define	SIR_NET			SIR_NET
 define	SIR_CLOCK		SIR_CLOCK

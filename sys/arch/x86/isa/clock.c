@@ -183,8 +183,8 @@ int clock_debug = 0;
 #define DPRINTF(arg)
 #endif
 
-/* Used by lapic.c */
-unsigned int	gettick(void);
+void (*x86_delay)(unsigned int) = i8254_delay;
+
 void		sysbeep(int, int);
 static void     tickle_tc(void);
 

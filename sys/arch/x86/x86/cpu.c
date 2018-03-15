@@ -774,7 +774,7 @@ cpu_start_secondary(struct cpu_info *ci)
 	KASSERT(cpu_starting == NULL);
 	cpu_starting = ci;
 	for (i = 100000; (!(ci->ci_flags & CPUF_PRESENT)) && i > 0; i--) {
-		i8254_delay(10);
+		x86_delay(10);
 	}
 
 	if ((ci->ci_flags & CPUF_PRESENT) == 0) {
@@ -810,7 +810,7 @@ cpu_boot_secondary(struct cpu_info *ci)
 
 	atomic_or_32(&ci->ci_flags, CPUF_GO);
 	for (i = 100000; (!(ci->ci_flags & CPUF_RUNNING)) && i > 0; i--) {
-		i8254_delay(10);
+		x86_delay(10);
 	}
 	if ((ci->ci_flags & CPUF_RUNNING) == 0) {
 		aprint_error_dev(ci->ci_dev, "failed to start\n");
@@ -1070,7 +1070,7 @@ mp_cpu_start(struct cpu_info *ci, paddr_t target)
 			    __func__);
 			return error;
 		}
-		i8254_delay(10000);
+		x86_delay(10000);
 
 		error = x86_ipi_startup(ci->ci_cpuid, target / PAGE_SIZE);
 		if (error != 0) {
@@ -1078,7 +1078,7 @@ mp_cpu_start(struct cpu_info *ci, paddr_t target)
 			    __func__);
 			return error;
 		}
-		i8254_delay(200);
+		x86_delay(200);
 
 		error = x86_ipi_startup(ci->ci_cpuid, target / PAGE_SIZE);
 		if (error != 0) {
@@ -1086,7 +1086,7 @@ mp_cpu_start(struct cpu_info *ci, paddr_t target)
 			    __func__);
 			return error;
 		}
-		i8254_delay(200);
+		x86_delay(200);
 	}
 
 	return 0;
@@ -1244,7 +1244,7 @@ cpu_get_tsc_freq(struct cpu_info *ci)
 
 	if (cpu_hascounter()) {
 		last_tsc = cpu_counter_serializing();
-		i8254_delay(100000);
+		x86_delay(100000);
 		ci->ci_data.cpu_cc_freq =
 		    (cpu_counter_serializing() - last_tsc) * 10;
 	}

@@ -73,6 +73,33 @@ device	vmt: sysmon_power, sysmon_taskq
 attach	vmt at cpufeaturebus
 file	arch/x86/x86/vmt.c		vmt
 
+device	hyperv
+attach	hyperv at cpufeaturebus
+file	arch/x86/x86/hyperv.c		hyperv needs-flag
+
+define	hypervvmbus {}
+device	vmbus: hypervvmbus
+file	arch/x86/x86/vmbus.c		vmbus needs-flag
+
+device	hvheartbeat
+attach	hvheartbeat at hypervvmbus
+file	arch/x86/x86/hvheartbeat_vmbus.c hvheartbeat
+
+device	hvkvp
+attach	hvkvp at hypervvmbus
+file	arch/x86/x86/hvkvp_vmbus.c	hvkvp
+
+device	hvshutdown
+attach	hvshutdown at hypervvmbus
+file	arch/x86/x86/hvshutdown_vmbus.c	hvshutdown
+
+device	hvtimesync
+attach	hvtimesync at hypervvmbus
+file	arch/x86/x86/hvtimesync_vmbus.c	hvtimesync
+
+file	arch/x86/x86/vmbusic.c		hvheartbeat | hvkvp | hvshutdown |
+					hvtimesync
+
 file	arch/x86/x86/apic.c		ioapic | lapic
 file	arch/x86/x86/bus_dma.c		machdep
 file	arch/x86/x86/bus_space.c	machdep

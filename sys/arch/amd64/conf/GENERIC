@@ -84,6 +84,7 @@ options 	SPECTRE_V2_GCC_MITIGATION
 acpicpu*	at cpu?		# ACPI CPU (including frequency scaling)
 coretemp*	at cpu?		# Intel on-die thermal sensor
 est0		at cpu0		# Intel Enhanced SpeedStep (non-ACPI)
+hyperv0 	at cpu0		# Microsoft Hyper-V
 #odcm0		at cpu0		# On-demand clock modulation
 powernow0	at cpu0		# AMD PowerNow! and Cool'n'Quiet (non-ACPI)
 vmt0		at cpu0		# VMware Tools
@@ -1065,6 +1066,11 @@ ld*	at virtio?			# Virtio disk device
 vioif*	at virtio?			# Virtio network device
 viornd* at virtio?			# Virtio entropy device
 vioscsi* at virtio?			# Virtio SCSI device
+
+# Hyper-V devices
+vmbus*		at acpi?		# Hyper-V VMBus
+#hvn*		at vmbus?		# Hyper-V NetVSC
+#hvs*		at vmbus?		# Hyper-V StorVSC
 
 # Pull in optional local configuration
 cinclude "arch/amd64/conf/GENERIC.local"

@@ -587,7 +587,6 @@ lapic_initclocks(void)
 	lapic_eoi();
 }
 
-extern unsigned int gettick(void);	/* XXX put in header file */
 extern u_long rtclock_tval; /* XXX put in header file */
 extern void (*initclock_func)(void); /* XXX put in header file */
 
@@ -605,41 +604,58 @@ extern void (*initclock_func)(void); /* XXX put in header file */
 void
 lapic_calibrate_timer(struct cpu_info *ci)
 {
-	unsigned int seen, delta, initial_i8254, initial_lapic;
-	unsigned int cur_i8254, cur_lapic;
-	uint64_t tmp;
+	struct timecounter *tc;
+	timecounter_get_t *tick_func;
+	unsigned int tval, mask, delta, initial_counter, initial_lapic;
+	unsigned int cur_counter, cur_lapic;
+	uint64_t seen, end, tmp, freq;
 	int i;
 	char tbuf[9];
 
-	aprint_debug_dev(ci->ci_dev, "calibrating local timer\n");
+	if (lapic_per_second == 0) {
+		aprint_debug_dev(ci->ci_dev, "calibrating local timer\n");
 
-	/*
-	 * Configure timer to one-shot, interrupt masked,
-	 * large positive number.
-	 */
-	lapic_writereg(LAPIC_LVTT, LAPIC_LVTT_M);
-	lapic_writereg(LAPIC_DCR_TIMER, LAPIC_DCRT_DIV1);
-	lapic_writereg(LAPIC_ICR_TIMER, 0x80000000);
+		tc = timecounter;
+		if (tc->tc_quality <= 0) {
+			tick_func = (timecounter_get_t *)gettick;
+			tval = rtclock_tval;
+			mask = ~0u;
+			freq = TIMER_FREQ;
+		} else {
+			tick_func = tc->tc_get_timecount;
+			tval = mask = tc->tc_counter_mask;
+			freq = tc->tc_frequency;
+		}
+		end = freq / 100;
 
-	x86_disable_intr();
+		/*
+		 * Configure timer to one-shot, interrupt masked,
+		 * large positive number.
+		 */
+		lapic_writereg(LAPIC_LVTT, LAPIC_LVTT_M);
+		lapic_writereg(LAPIC_DCR_TIMER, LAPIC_DCRT_DIV1);
+		lapic_writereg(LAPIC_ICR_TIMER, 0x80000000);
 
-	initial_lapic = lapic_gettick();
-	initial_i8254 = gettick();
+		x86_disable_intr();
 
-	for (seen = 0; seen < TIMER_FREQ / 100; seen += delta) {
-		cur_i8254 = gettick();
-		if (cur_i8254 > initial_i8254)
-			delta = rtclock_tval - (cur_i8254 - initial_i8254);
-		else
-			delta = initial_i8254 - cur_i8254;
-		initial_i8254 = cur_i8254;
+		initial_lapic = lapic_gettick();
+		initial_counter = tick_func(tc) & mask;
+
+		for (seen = 0; seen < end; seen += delta) {
+			cur_counter = tick_func(tc) & mask;
+			if (cur_counter > initial_counter)
+				delta = tval - (cur_counter - initial_counter);
+			else
+				delta = initial_counter - cur_counter;
+			initial_counter = cur_counter;
+		}
+		cur_lapic = lapic_gettick();
+
+		x86_enable_intr();
+
+		tmp = initial_lapic - cur_lapic;
+		lapic_per_second = (tmp * freq + seen / 2) / seen;
 	}
-	cur_lapic = lapic_gettick();
-
-	x86_enable_intr();
-
-	tmp = initial_lapic - cur_lapic;
-	lapic_per_second = (tmp * TIMER_FREQ + seen / 2) / seen;
 
 	humanize_number(tbuf, sizeof(tbuf), lapic_per_second, "Hz", 1000);
 
@@ -777,7 +793,7 @@ i82489_ipi_init(int target)
 
 	i82489_writereg(LAPIC_ICRLO, LAPIC_DLMODE_INIT | LAPIC_LEVEL_ASSERT);
 	i82489_icr_wait();
-	i8254_delay(10000);
+	x86_delay(10000);
 	i82489_writereg(LAPIC_ICRLO,
 	    LAPIC_DLMODE_INIT | LAPIC_TRIGGER_LEVEL | LAPIC_LEVEL_DEASSERT);
 	i82489_icr_wait();
@@ -849,7 +865,7 @@ x2apic_ipi_init(int target)
 
 	x2apic_write_icr(target, LAPIC_DLMODE_INIT | LAPIC_LEVEL_ASSERT);
 
-	i8254_delay(10000);
+	x86_delay(10000);
 
 	x2apic_write_icr(0,
 	    LAPIC_DLMODE_INIT | LAPIC_TRIGGER_LEVEL | LAPIC_LEVEL_DEASSERT);

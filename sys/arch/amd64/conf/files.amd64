@@ -188,5 +188,9 @@ include "dev/apm/files.apm"
 include "dev/acpi/files.acpi"
 file	arch/amd64/acpi/acpi_wakeup_low.S	acpi
 
+# Hyper-V VMBus
+attach	vmbus at acpinodebus with vmbus_acpi
+file	arch/x86/acpi/vmbus_acpi.c		vmbus_acpi
+
 include	"arch/amd64/conf/majors.amd64"
 endif #xen

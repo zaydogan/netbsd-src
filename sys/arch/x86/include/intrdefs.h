@@ -27,6 +27,7 @@
  */
 #define LIR_IPI		31
 #define LIR_TIMER	30
+#define LIR_HYPERV	29
 
 /*
  * XXX These should be lowest numbered, but right now would
@@ -34,11 +35,11 @@
  * means that soft interrupt take priority over hardware
  * interrupts when lowering the priority level!
  */
-#define	SIR_SERIAL	29
-#define	SIR_NET		28
-#define	SIR_BIO		27
-#define	SIR_CLOCK	26
-#define	SIR_PREEMPT	25
+#define	SIR_SERIAL	28
+#define	SIR_NET		27
+#define	SIR_BIO		26
+#define	SIR_CLOCK	25
+#define	SIR_PREEMPT	24
 
 /*
  * Maximum # of interrupt sources per CPU. 32 to fit in one word.
