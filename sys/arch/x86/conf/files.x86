@@ -83,19 +83,19 @@ file	arch/x86/x86/vmbus.c		vmbus needs-flag
 
 device	hvheartbeat
 attach	hvheartbeat at hypervvmbus
-file	arch/x86/x86/hvheartbeat_vmbus.c hvheartbeat
+file	arch/x86/x86/hvheartbeat.c	hvheartbeat
 
 device	hvkvp
 attach	hvkvp at hypervvmbus
-file	arch/x86/x86/hvkvp_vmbus.c	hvkvp
+file	arch/x86/x86/hvkvp.c		hvkvp
 
-device	hvshutdown
+device	hvshutdown: sysmon_power, sysmon_taskq
 attach	hvshutdown at hypervvmbus
-file	arch/x86/x86/hvshutdown_vmbus.c	hvshutdown
+file	arch/x86/x86/hvshutdown.c	hvshutdown
 
 device	hvtimesync
 attach	hvtimesync at hypervvmbus
-file	arch/x86/x86/hvtimesync_vmbus.c	hvtimesync
+file	arch/x86/x86/hvtimesync.c	hvtimesync
 
 file	arch/x86/x86/vmbusic.c		hvheartbeat | hvkvp | hvshutdown |
 					hvtimesync
