@@ -31,11 +31,6 @@
 #ifndef	_SYS_EFI_H_
 #define	_SYS_EFI_H_
 
-typedef uint16_t efi_char;
-typedef unsigned long efi_status;
-
-#if defined(_KERNEL) || defined(_STANDALONE)
-
 #include <sys/uuid.h>
 
 #define	EFI_PAGE_SHIFT		12
@@ -57,6 +52,9 @@ enum efi_reset {
 	EFI_RESET_COLD,
 	EFI_RESET_WARM
 };
+
+typedef uint16_t efi_char;
+typedef unsigned long efi_status;
 
 struct efi_cfgtbl {
 	struct uuid	ct_uuid;
@@ -177,7 +175,5 @@ struct efi_systbl {
 	u_long		st_entries;
 	struct efi_cfgtbl *st_cfgtbl;
 };
-
-#endif	/* _KERNEL || _STANDALONE */
 
 #endif	/* _SYS_EFI_H_ */

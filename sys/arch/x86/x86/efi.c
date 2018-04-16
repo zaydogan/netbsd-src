@@ -66,6 +66,9 @@ void 		efi_aprintcfgtbl(void);
 void 		efi_aprintuuid(const struct uuid *);
 bool 		efi_uuideq(const struct uuid *, const struct uuid *);
 int		efi_status_to_errno(efi_status);
+int		efi_get_table(const struct uuid *, void **);
+int		efi_get_time(struct efi_tm *);
+int		efi_set_time(struct efi_tm *);
 int		efi_var_get(efi_char *, struct uuid *, uint32_t *, size_t *,
 		    void *);
 int		efi_var_nextname(size_t *, efi_char *, struct uuid *);
@@ -952,6 +955,70 @@ efi_status_to_errno(efi_status status)
 }
 
 int
+efi_get_table(const struct uuid *uuid, void **ptr)
+{
+#ifdef __HAVE_MM_MD_DIRECT_MAPPED_PHYS
+	paddr_t pa;
+#endif
+
+	if (efi_systbl_va == NULL || efi_cfgtblhead_va == NULL)
+		return ENXIO;
+
+#ifdef __HAVE_MM_MD_DIRECT_MAPPED_PHYS
+	pa = efi_getcfgtblpa(uuid);
+	if (pa != 0) {
+		*ptr = (void *)efi_getva(pa);
+		return 0;
+	}
+	return ENOENT;
+#else
+	/* XXX non __HAVE_MM_MD_DIRECT_MAPPED_PHYS case */
+	return ENOTSUP;
+#endif
+}
+
+int
+efi_get_time(struct efi_tm *tm)
+{
+	efi_status status;
+	struct efi_tmcap tmcap;
+	int s;
+
+	if (efi_rt_va == NULL)
+		return ENXIO;
+
+	mutex_enter(&efi_lock);
+
+	s = splhigh();
+	status = efi_rt_va->rt_gettime(tm, &tmcap);
+	splx(s);
+
+	mutex_exit(&efi_lock);
+
+	return efi_status_to_errno(status);
+}
+
+int
+efi_set_time(struct efi_tm *tm)
+{
+	efi_status status;
+	int s;
+
+	if (efi_rt_va == NULL)
+		return ENXIO;
+
+	mutex_enter(&efi_lock);
+
+	s = splhigh();
+	status = efi_rt_va->rt_settime(tm);
+	splx(s);
+
+	mutex_exit(&efi_lock);
+
+	return efi_status_to_errno(status);
+}
+
+int
 efi_var_get(efi_char *name, struct uuid *vendor, uint32_t *attrib,
     size_t *datasz, void *data)
 {
@@ -1055,15 +1122,26 @@ efiioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	int error;
 
 	switch (cmd) {
-	case EFIIOC_RUNTIME:
-		if (efi_rt_va == NULL)
-			*(int *)data = 0;
-		else if (!efi_is32x64)
-			*(int *)data = sizeof(vaddr_t) == 4 ? 32 : 64;
-		else
-			*(int *)data = sizeof(vaddr_t) == 4 ? 64 : 32;
-		error = 0;
+	case EFIIOC_GET_TABLE:
+	{
+		struct efi_get_table_ioc *egti = data;
+		error = efi_get_table(&egti->uuid, &egti->ptr);
 		break;
+	}
+
+	case EFIIOC_GET_TIME:
+	{
+		struct efi_tm *tm = data;
+		error = efi_get_time(tm);
+		break;
+	}
+
+	case EFIIOC_SET_TIME:
+	{
+		struct efi_tm *tm = data;
+		error = efi_set_time(tm);
+		break;
+	}
 
 	case EFIIOC_VAR_GET:
 	{
