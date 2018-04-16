@@ -34,6 +34,7 @@ __KERNEL_RCSID(0, "$NetBSD: efi.c,v 1.15 2018/05/19 17:18:57 jakllsch Exp $");
 #include <sys/systm.h>
 #include <sys/uuid.h>
 #include <sys/conf.h>
+#include <sys/sysctl.h>
 
 #include <uvm/uvm.h>
 
@@ -1179,4 +1180,48 @@ var_set_out:
 	}
 
 	return error;
+}
+
+/*
+ * machine dependent EFI system variables.
+ */
+static int
+sysctl_machdep_efi_runtime(SYSCTLFN_ARGS)
+{
+	struct sysctlnode node = *rnode;
+	int val;
+
+	if (efi_rt_va == NULL)
+		val = 0;
+	else if (!efi_is32x64)
+		val = sizeof(vaddr_t) == 4 ? 32 : 64;
+	else
+		val = sizeof(vaddr_t) == 4 ? 64 : 32;
+	node.sysctl_data = &val;
+	return sysctl_lookup(SYSCTLFN_CALL(&node));
+}
+
+SYSCTL_SETUP(sysctl_machdep_efi_setup, "sysctl machdep efi subtree setup")
+{
+	const struct sysctlnode *rnode;
+
+	if (!bootmethod_efi)
+		return;
+
+	sysctl_createv(clog, 0, NULL, NULL,
+	    CTLFLAG_PERMANENT,
+	    CTLTYPE_NODE, "machdep", NULL,
+	    NULL, 0, NULL, 0,
+	    CTL_MACHDEP, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, &rnode,
+	    CTLFLAG_PERMANENT,
+	    CTLTYPE_NODE, "efi", NULL,
+	    NULL, 0, NULL, 0,
+	    CTL_MACHDEP, CTL_CREATE, CTL_EOL);
+
+	sysctl_createv(clog, 0, &rnode, NULL,
+	    CTLFLAG_READONLY,
+	    CTLTYPE_INT, "runtime", NULL,
+	    sysctl_machdep_efi_runtime, 0, NULL, 0,
+	    CTL_MACHDEP, CTL_CREATE, CTL_EOL);
 }
