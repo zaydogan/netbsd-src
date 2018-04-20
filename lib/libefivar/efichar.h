@@ -1,7 +1,7 @@
 /*	$NetBSD$	*/
 
 /*-
- * Copyright (c) 2017 Netflix, Inc.
+ * Copyright (c) 2010 Marcel Moolenaar
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,28 +25,20 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: head/lib/libefivar/efi-osdep.h 330279 2018-03-02 15:12:18Z emaste $
+ * $FreeBSD: head/stand/efi/include/efichar.h 326854 2017-12-14 16:41:52Z tsoome $
  */
 
-#ifndef	_EFI_OSDEP_H_
-#define	_EFI_OSDEP_H_
+#ifndef _BOOT_EFI_EFICHAR_H_
+#define	_BOOT_EFI_EFICHAR_H_
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <limits.h>
-#include <uuid.h>
+#ifdef _STANDALONE
+#include <efi.h>
 
-#undef EFI_PAGE_SIZE
-#undef EFI_PAGE_MASK
+typedef CHAR16 efi_char;
+#endif
 
-#undef __WCHAR_TYPE__
-#define __WCHAR_TYPE__ uint16_t
-#define EFIAPI
-#include "efibind.h"
-#include "efidef.h"
+int ucs2_to_utf8(const efi_char *, char **);
+int utf8_to_ucs2(const char *, efi_char **, size_t *);
+int ucs2len(const efi_char *);
 
-#define CHAR16 char
-#define CONST const
-
-#endif /* _EFI_OSDEP_H_ */
+#endif /* _BOOT_EFI_EFICHAR_H_ */

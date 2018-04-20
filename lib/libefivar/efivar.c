@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2016 Netflix, Inc.
  * All rights reserved.
@@ -25,11 +27,18 @@
  */
 
 #include <sys/cdefs.h>
+#ifndef lint
+#ifdef __RCSID
+__RCSID("$NetBSD$");
+#endif
+#ifdef __FBSDID
 __FBSDID("$FreeBSD: head/lib/libefivar/efivar.c 330279 2018-03-02 15:12:18Z emaste $");
+#endif
+#endif
 
 #include <efivar.h>
 #include <sys/efiio.h>
-#include <sys/param.h>
+#include <sys/ioctl.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -91,7 +100,7 @@ efi_guid_tbl_compile(void)
 
 	if (done)
 		return;
-	for (i = 0; i < nitems(guid_tbl); i++) {
+	for (i = 0; i < __arraycount(guid_tbl); i++) {
 		uuid_from_string(guid_tbl[i].uuid_str, &guid_tbl[i].guid,
 		    &status);
 		/* all f's is a bad version, so ignore that error */
@@ -107,7 +116,7 @@ efi_known_guid(struct uuid_table **tbl)
 {
 
 	*tbl = guid_tbl;
-	return (nitems(guid_tbl));
+	return (__arraycount(guid_tbl));
 }
 
 static int
@@ -310,7 +319,7 @@ efi_guid_to_name(efi_guid_t *guid, char **name)
 	uint32_t status;
 
 	efi_guid_tbl_compile();
-	for (i = 0; i < nitems(guid_tbl); i++) {
+	for (i = 0; i < __arraycount(guid_tbl); i++) {
 		if (uuid_equal(guid, &guid_tbl[i].guid, &status)) {
 			*name = strdup(guid_tbl[i].name);
 			return (0);
@@ -347,7 +356,7 @@ efi_name_to_guid(const char *name, efi_guid_t *guid)
 	size_t i;
 
 	efi_guid_tbl_compile();
-	for (i = 0; i < nitems(guid_tbl); i++) {
+	for (i = 0; i < __arraycount(guid_tbl); i++) {
 		if (strcmp(name, guid_tbl[i].name) == 0) {
 			*guid = guid_tbl[i].guid;
 			return (0);

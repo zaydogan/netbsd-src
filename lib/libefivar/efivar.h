@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2016 Netflix, Inc.
  * All rights reserved.
@@ -88,8 +90,7 @@ int efi_str_to_guid(const char *s, efi_guid_t *guid);
 int efi_variables_supported(void);
 
 /* FreeBSD extensions */
-struct uuid_table
-{
+struct uuid_table {
 	const char *uuid_str;
 	const char *name;
 	efi_guid_t guid;

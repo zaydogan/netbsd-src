@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2017 Netflix, Inc.
  * All rights reserved.
@@ -30,7 +32,14 @@
  */
 
 #include <sys/cdefs.h>
+#ifndef lint
+#ifdef __RCSID
+__RCSID("$NetBSD$");
+#endif
+#ifdef __FBSDID
 __FBSDID("$FreeBSD: head/lib/libefivar/efivar-dp-format.c 330279 2018-03-02 15:12:18Z emaste $");
+#endif
+#endif
 
 #include <efivar.h>
 #include <stdio.h>
@@ -1877,7 +1886,7 @@ DevPathToTextFilePath (
   char *name = NULL;
 
   Fp = DevPath;
-  ucs2_to_utf8(Fp->PathName, &name);
+  ucs2_to_utf8((efi_char *)Fp->PathName, &name);
   UefiDevicePathLibCatPrint (Str, "File(%s)", name);
   free(name);
 }
@@ -2420,7 +2429,7 @@ efidp_format_device_path(char *buf, size_t len, const_efidp dp, ssize_t max)
 	char *str;
 	ssize_t retval;
 
-	str = UefiDevicePathLibConvertDevicePathToText (
+	str = UefiDevicePathLibConvertDevicePathToText(
 		__DECONST(EFI_DEVICE_PATH_PROTOCOL *, dp), FALSE, TRUE);
 	if (str == NULL)
 		return -1;
@@ -2437,7 +2446,7 @@ efidp_format_device_path_node(char *buf, size_t len, const_efidp dp)
 	char *str;
 	ssize_t retval;
 
-	str = UefiDevicePathLibConvertDeviceNodeToText (
+	str = UefiDevicePathLibConvertDeviceNodeToText(
 		__DECONST(EFI_DEVICE_PATH_PROTOCOL *, dp), FALSE, TRUE);
 	if (str == NULL)
 		return -1;
@@ -2462,6 +2471,6 @@ efidp_extract_file_path(const_efidp dp)
 	char *name = NULL;
 
 	fp = (const void *)dp;
-	ucs2_to_utf8(fp->PathName, &name);
+	ucs2_to_utf8((const efi_char *)fp->PathName, &name);
 	return name;
 }

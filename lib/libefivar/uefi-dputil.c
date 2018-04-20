@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2017 Netflix, Inc.
  * All rights reserved.
@@ -30,7 +32,14 @@
  */
 
 #include <sys/cdefs.h>
+#ifndef lint
+#ifdef __RCSID
+__RCSID("$NetBSD$");
+#endif
+#ifdef __FBSDID
 __FBSDID("$FreeBSD: head/lib/libefivar/uefi-dputil.c 330279 2018-03-02 15:12:18Z emaste $");
+#endif
+#endif
 
 #include <efivar.h>
 #include <limits.h>
@@ -404,7 +413,7 @@ SetDevicePathNodeLength (
   ASSERT ((Length >= sizeof (EFI_DEVICE_PATH_PROTOCOL)) && (Length < SIZE_64KB));
 //  return WriteUnaligned16 ((UINT16 *)&((EFI_DEVICE_PATH_PROTOCOL *)(Node))->Length[0], (UINT16)(Length));
   le16enc(&((EFI_DEVICE_PATH_PROTOCOL *)(Node))->Length[0], (UINT16)(Length));
-  return Length;
+  return (UINT16) Length;
 }
 
 /**

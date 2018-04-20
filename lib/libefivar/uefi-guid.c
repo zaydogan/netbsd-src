@@ -1,4 +1,5 @@
 /* This generated file is in the public domain */
+/* $NetBSD$ */
 /* $FreeBSD: head/lib/libefivar/uefi-guid.c 314926 2017-03-09 00:31:31Z imp $ */
 
 #include <uuid.h>

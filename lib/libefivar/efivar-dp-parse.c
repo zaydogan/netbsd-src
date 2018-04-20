@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2017 Netflix, Inc.
  * All rights reserved.
@@ -30,7 +32,14 @@
  */
 
 #include <sys/cdefs.h>
+#ifndef lint
+#ifdef __RCSID
+__RCSID("$NetBSD$");
+#endif
+#ifdef __FBSDID
 __FBSDID("$FreeBSD: head/lib/libefivar/efivar-dp-parse.c 330279 2018-03-02 15:12:18Z emaste $");
+#endif
+#endif
 
 #include <ctype.h>
 #include <efivar.h>
@@ -322,7 +331,7 @@ GetNextDeviceNodeStr (
 }
 
 
-#ifndef __FreeBSD__
+#if !defined(__FreeBSD__) && !defined(__NetBSD__)
 /**
   Return whether the integer string is a hex string.
 
@@ -1613,7 +1622,7 @@ DevPathFromTextSAS (
     } else {
       Uint16 = ((UINT16) Strtoi (LocationStr) & BIT0);
     }
-    Info |= (Uint16 << 5);
+    Info |= (UINT16) (Uint16 << 5);
 
     //
     // Connect is an integer between 0 and 3 or else
@@ -1626,7 +1635,7 @@ DevPathFromTextSAS (
     } else {
       Uint16 = ((UINT16) Strtoi (ConnectStr) & (BIT0 | BIT1));
     }
-    Info |= (Uint16 << 6);
+    Info |= (UINT16) (Uint16 << 6);
 
   } else {
     Info = (UINT16) Strtoi (SASSATAStr);
@@ -1711,7 +1720,7 @@ DevPathFromTextSasEx (
     } else {
       Uint16 = ((UINT16) Strtoi (LocationStr) & BIT0);
     }
-    Info |= (Uint16 << 5);
+    Info |= (UINT16) (Uint16 << 5);
 
     //
     // Connect is an integer between 0 and 3 or else
@@ -1724,7 +1733,7 @@ DevPathFromTextSasEx (
     } else {
       Uint16 = ((UINT16) Strtoi (ConnectStr) & (BIT0 | BIT1));
     }
-    Info |= (Uint16 << 6);
+    Info |= (UINT16) (Uint16 << 6);
 
   } else {
     Info = (UINT16) Strtoi (SASSATAStr);

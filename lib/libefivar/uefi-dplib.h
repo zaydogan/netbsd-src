@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2017 Netflix, Inc.
  * All rights reserved.
@@ -47,21 +49,111 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 
 #ifndef _UEFI_DEVICE_PATH_LIB_H_
 #define _UEFI_DEVICE_PATH_LIB_H_
-#include <Uefi.h>
-#include <Protocol/DevicePathUtilities.h>
-#include <Protocol/DebugPort.h>
-#include <Protocol/DevicePathToText.h>
-#include <Protocol/DevicePathFromText.h>
-#include <Guid/PcAnsi.h>
-#include <Library/DebugLib.h>
-#include <Library/PrintLib.h>
-#include <Library/BaseLib.h>
-#include <Library/BaseMemoryLib.h>
-#include <Library/MemoryAllocationLib.h>
-#include <Library/UefiBootServicesTableLib.h>
-#include <Library/DevicePathLib.h>
-#include <Library/PcdLib.h>
-#include <IndustryStandard/Bluetooth.h>
+
+#ifdef __NetBSD__
+#include "efidevp.h"
+#include "efipciio.h"
+#include "efiprot.h"
+#include "eficon.h"
+#include "efiser.h"
+#include "efi_nii.h"
+#include "efipxebc.h"
+#include "efinet.h"
+#include "efiapi.h"
+#include "efifs.h"
+#include "efierr.h"
+#include "efiui.h"
+#include "efiip.h"
+#include "efiudp.h"
+#include "efitcp.h"
+
+#include <stdarg.h>
+
+#define VA_LIST				va_list
+#define VA_START			va_start
+#define VA_END				va_end
+
+#define BIT0				__BIT(0)
+#define BIT1				__BIT(1)
+#define BIT2				__BIT(2)
+#define BIT3				__BIT(3)
+#define BIT4				__BIT(4)
+#define BIT5				__BIT(5)
+#define BIT6				__BIT(6)
+#define BIT7				__BIT(7)
+
+#define __DECONST(s, v)			((s)__UNCONST((v)))
+
+#define GUID				EFI_GUID
+#define EFI_PNP_ID			EISA_PNP_ID
+#define EFI_DEVICE_PATH_PROTOCOL	EFI_DEVICE_PATH
+#define ACPI_EXTENDED_HID_DEVICE_PATH	EXPANDED_ACPI_HID_DEVICE_PATH
+#define ACPI_EXTENDED_DP		EXPANDED_ACPI_DP
+
+#define PcdGet32(TokenName)		_PCD_GET_MODE_32_##TokenName
+
+/* PCCARD_DEVICE_PATH */
+#define FunctionNumber			SocketNumber
+/* CONTROLLER_DEVICE_PATH */
+#define ControllerNumber		Controller
+/* USB_DEVICE_PATH */
+#define ParentPortNumber		Port
+#define InterfaceNumber			Endpoint
+/* USB_CLASS_DEVICE_PATH */
+#define DeviceSubClass			DeviceSubclass
+
+extern EFI_GUID gEfiDebugPortProtocolGuid;
+extern EFI_GUID gEfiPcAnsiGuid;
+extern EFI_GUID gEfiPersistentVirtualCdGuid;
+extern EFI_GUID gEfiPersistentVirtualDiskGuid;
+extern EFI_GUID gEfiSasDevicePathGuid;
+extern EFI_GUID gEfiUartDevicePathGuid;
+extern EFI_GUID gEfiVT100Guid;
+extern EFI_GUID gEfiVT100PlusGuid;
+extern EFI_GUID gEfiVTUTF8Guid;
+extern EFI_GUID gEfiVirtualCdGuid;
+extern EFI_GUID gEfiVirtualDiskGuid;
+
+#undef DevicePathType
+#undef DevicePathSubType
+#undef DevicePathNodeLength
+#undef NextDevicePathNode
+UINT8 EFIAPI DevicePathType(IN CONST VOID *Node);
+UINT8 EFIAPI DevicePathSubType(IN CONST VOID  *Node);
+UINTN EFIAPI DevicePathNodeLength(IN CONST VOID  *Node);
+EFI_DEVICE_PATH_PROTOCOL * EFIAPI NextDevicePathNode(IN CONST VOID *Node);
+
+#undef IsDevicePathEndType
+#undef IsDevicePathEnd
+#undef SetDevicePathNodeLength
+#undef SetDevicePathEndNode
+BOOLEAN EFIAPI IsDevicePathValid(IN CONST EFI_DEVICE_PATH_PROTOCOL *DevicePath,
+    IN UINTN MaxSize);
+BOOLEAN EFIAPI IsDevicePathEndType(IN CONST VOID *Node);
+BOOLEAN EFIAPI IsDevicePathEnd(IN CONST VOID *Node);
+UINT16 EFIAPI SetDevicePathNodeLength(IN OUT VOID *Node, IN UINTN Length);
+VOID EFIAPI SetDevicePathEndNode(OUT VOID *Node);
+UINTN EFIAPI GetDevicePathSize(IN CONST EFI_DEVICE_PATH_PROTOCOL *DevicePath);
+EFI_DEVICE_PATH_PROTOCOL * EFIAPI DuplicateDevicePath(
+    IN CONST EFI_DEVICE_PATH_PROTOCOL *DevicePath);
+EFI_DEVICE_PATH_PROTOCOL * EFIAPI AppendDevicePath(
+    IN CONST EFI_DEVICE_PATH_PROTOCOL *FirstDevicePath, OPTIONAL
+    IN CONST EFI_DEVICE_PATH_PROTOCOL *SecondDevicePath OPTIONAL);
+EFI_DEVICE_PATH_PROTOCOL * EFIAPI AppendDevicePathNode(
+    IN CONST EFI_DEVICE_PATH_PROTOCOL *DevicePath, OPTIONAL
+    IN CONST EFI_DEVICE_PATH_PROTOCOL *DevicePathNode OPTIONAL);
+EFI_DEVICE_PATH_PROTOCOL * EFIAPI CreateDeviceNode(IN UINT8 NodeType,
+    IN UINT8 NodeSubType, IN UINT16 NodeLength);
+
+static __inline void *
+reallocf(void *ptr, size_t sz)
+{
+	void *newptr = realloc(ptr, sz);
+	if (newptr == NULL && ptr != NULL)
+		free(ptr);
+	return newptr;
+}
+#endif	/* __NetBSD__ */
 
 #define IS_COMMA(a)                ((a) == ',')
 #define IS_HYPHEN(a)               ((a) == '-')
@@ -182,6 +274,254 @@ typedef struct {
   EFI_GUID                  Guid;
   UINT8                     VendorDefinedData[1];
 } VENDOR_DEVICE_PATH_WITH_DATA;
+
+#ifdef __NetBSD__
+
+/* Hardware Device Paths */
+
+#ifndef HW_BMC_DP
+#define HW_BMC_DP		0x06
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT8				InterfaceType;
+	UINT8				BaseAddress[8];
+} BMC_DEVICE_PATH;
+#endif
+
+/* ACPI Device Paths */
+
+#ifndef ACPI_ADR_DP
+#define ACPI_ADR_DP		0x03
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT32				ADR;
+} ACPI_ADR_DEVICE_PATH;
+#endif
+
+/* Messaging Device Paths */
+
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	EFI_IPv4_ADDRESS		LocalIpAddress;
+	EFI_IPv4_ADDRESS		RemoteIpAddress;
+	UINT16				LocalPort;
+	UINT16				RemotePort;
+	UINT16				Protocol;
+	BOOLEAN				StaticIpAddress;
+	EFI_IPv4_ADDRESS		GatewayIpAddress;
+	EFI_IPv4_ADDRESS		SubnetMask;
+} IPv4_DEVICE_PATH_WITH_GATEWAY;
+#define IPv4_DEVICE_PATH	IPv4_DEVICE_PATH_WITH_GATEWAY
+
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	EFI_IPv6_ADDRESS		LocalIpAddress;
+	EFI_IPv6_ADDRESS		RemoteIpAddress;
+	UINT16				LocalPort;
+	UINT16				RemotePort;
+	UINT16				Protocol;
+	UINT8				IpAddressOrigin;
+	UINT8				PrefixLength;
+	EFI_IPv6_ADDRESS		GatewayIpAddress;
+} IPv6_DEVICE_PATH_WITH_GATEWAY;
+#define IPv6_DEVICE_PATH	IPv6_DEVICE_PATH_WITH_GATEWAY
+
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT32				ResourceFlags;
+	UINT8				PortGid[16];
+	UINT64				ServiceId;
+	UINT64				TargetPortId;
+	UINT64				DeviceId;
+} INFINIBAND_DEVICE_PATH_WITH_RESOURCEFLAGS;
+#define INFINIBAND_DEVICE_PATH	INFINIBAND_DEVICE_PATH_WITH_RESOURCEFLAGS
+
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	EFI_GUID			Guid;
+	UINT32				FlowControlMap;
+} UART_FLOW_CONTROL_DEVICE_PATH;
+
+#ifndef MSG_USB_WWID_DP
+#define MSG_USB_WWID_DP		0x10
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT16				InterfaceNumber;
+	UINT16				VendorId;
+	UINT16				ProductId;
+} USB_WWID_DEVICE_PATH;
+#endif
+
+#ifndef MSG_DEVICE_LOGICAL_UNIT_DP
+#define MSG_DEVICE_LOGICAL_UNIT_DP 0x11
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT8				Lun;
+} DEVICE_LOGICAL_UNIT_DEVICE_PATH;
+#endif
+
+#ifndef MSG_SATA_DP
+#define MSG_SATA_DP		0x12
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT16				HBAPortNumber;
+	UINT16				PortMultiplierPortNumber;
+	UINT16				Lun;
+} SATA_DEVICE_PATH;
+#endif
+
+#ifndef MSG_ISCSI_DP
+#define MSG_ISCSI_DP		0x13
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT16				NetworkProtocol;
+	UINT16				LoginOption;
+	UINT64				Lun;
+	UINT16				TargetPortalGroupTag;
+} ISCSI_DEVICE_PATH;
+#endif
+
+#ifndef MSG_FIBRECHANNELEX_DP
+#define MSG_FIBRECHANNELEX_DP	0x15
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT32				Reserved;
+	UINT8				WWN[8];
+	UINT8				Lun[8];
+} FIBRECHANNELEX_DEVICE_PATH;
+#endif
+
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	EFI_GUID			Guid;
+	UINT32				Reserved;
+	UINT64				SasAddress;
+	UINT64				Lun;
+	UINT16				DeviceTopology;
+	UINT16				RelativeTargetPort;
+} SAS_DEVICE_PATH;
+
+#ifndef MSG_SASEX_DP
+#define MSG_SASEX_DP		0x16
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT8				SasAddress[8];
+	UINT8				Lun[8];
+	UINT16				DeviceTopology;
+	UINT16				RelativeTargetPort;
+} SASEX_DEVICE_PATH;
+#endif
+
+#ifndef MSG_NVME_NAMESPACE_DP
+#define MSG_NVME_NAMESPACE_DP	0x17
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT32				NamespaceId;
+	UINT64				NamespaceUuid;
+} NVME_NAMESPACE_DEVICE_PATH;
+#endif
+
+#ifndef MSG_URI_DP
+#define MSG_URI_DP		0x18
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	CHAR8				Uri[];
+} URI_DEVICE_PATH;
+#endif
+
+#ifndef MSG_UFS_DP
+#define MSG_UFS_DP		0x19
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT8				Pun;
+	UINT8				Lun;
+} UFS_DEVICE_PATH;
+#endif
+
+#ifndef MSG_SD_DP
+#define MSG_SD_DP		0x1A
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT8				SlotNumber;
+} SD_DEVICE_PATH;
+#endif
+
+#ifndef MSG_EMMC_DP
+#define MSG_EMMC_DP		0x1D
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT8				SlotNumber;
+} EMMC_DEVICE_PATH;
+#endif
+
+#ifndef MSG_VLAN_DP
+#define MSG_VLAN_DP		0x14
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT16				VlanId;
+} VLAN_DEVICE_PATH;
+#endif
+
+typedef struct {
+	UINT8				Address[6];
+} BLUETOOTH_ADDRESS;
+
+#ifndef MSG_BLUETOOTH_DP
+#define MSG_BLUETOOTH_DP	0x1b
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	BLUETOOTH_ADDRESS		BD_ADDR;
+} BLUETOOTH_DEVICE_PATH;
+#endif
+
+#ifndef MSG_WIFI_DP
+#define MSG_WIFI_DP		0x1C
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT8				SSId[32];
+} WIFI_DEVICE_PATH;
+#endif
+
+/* Media Device Path */
+
+#ifndef MEDIA_PIWG_FW_FILE_DP
+#define MEDIA_PIWG_FW_FILE_DP	0x06
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	EFI_GUID			FvFileName;
+} MEDIA_FW_VOL_FILEPATH_DEVICE_PATH;
+#endif
+
+#ifndef MEDIA_PIWG_FW_VOL_DP
+#define MEDIA_PIWG_FW_VOL_DP	0x07
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	EFI_GUID			FvName;
+} MEDIA_FW_VOL_DEVICE_PATH;
+#endif
+
+#ifndef MEDIA_RELATIVE_OFFSET_RANGE_DP
+#define MEDIA_RELATIVE_OFFSET_RANGE_DP 0x08
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT32				Reserved;
+	UINT64				StartingOffset;
+	UINT64				EndingOffset;
+} MEDIA_RELATIVE_OFFSET_RANGE_DEVICE_PATH;
+#endif
+
+#ifndef MEDIA_RAM_DISK_DP
+#define MEDIA_RAM_DISK_DP		0x09
+typedef struct {
+	EFI_DEVICE_PATH_PROTOCOL	Header;
+	UINT32				StartingAddr[2];
+	UINT32				EndingAddr[2];
+	EFI_GUID			TypeGuid;
+	UINT16				Instance;
+} MEDIA_RAM_DISK_DEVICE_PATH;
+#endif
+
+#endif	/* __NetBSD__ */
 
 #pragma pack()
 
@@ -527,7 +867,7 @@ UefiDevicePathLibConvertTextToDevicePath (
 #define StrnCmp(a, b, n) strncmp(a, b, n)
 #define StrnLenS(str, max) strlen(str)
 #define Strtoi(x) strtol(x, NULL, 0)
-#define Strtoi64(x, y) *(long long *)y = strtoll(x, NULL, 0)
+#define Strtoi64(x, y) *(uint64_t *)y = strtoll(x, NULL, 0)
 #define SwapBytes64(u64) bswap64(u64)
 #define UnicodeStrToAsciiStrS(src, dest, len) strlcpy(dest, src, len)
 #define ZeroMem(p,l) memset(p, 0, l)
@@ -546,7 +886,7 @@ UefiDevicePathLibConvertTextToDevicePath (
 #define StrToGuid StrToGuidFreeBSD
 #define WriteUnaligned64 WriteUnaligned64FreeBSD
 
-static inline void *
+static __inline void *
 AllocateCopyPool(size_t l, const void *p)
 {
 	void *rv;
@@ -558,7 +898,7 @@ AllocateCopyPool(size_t l, const void *p)
 	return (rv);
 }
 
-static inline BOOLEAN
+static __inline BOOLEAN
 CompareGuid (const GUID *g1, const GUID *g2)
 {
 	uint32_t ignored_status;
@@ -567,7 +907,7 @@ CompareGuid (const GUID *g1, const GUID *g2)
 	    &ignored_status) == 0);
 }
 
-static inline int
+static __inline int
 StrHexToBytes(const char *str, size_t len, uint8_t *buf, size_t buflen)
 {
 	size_t i;
@@ -579,17 +919,17 @@ StrHexToBytes(const char *str, size_t len, uint8_t *buf, size_t buflen)
 	if (buflen != len / 2 || (len % 1) == 1)
 		return 1;
 	for (i = 0; i < len; i += 2) {
-		if (!isxdigit(str[i]) || !isxdigit(str[i + 1]))
+		if (!isxdigit((u_char)str[i]) || !isxdigit((u_char)str[i + 1]))
 			return 1;
 		hex[0] = str[i];
 		hex[1] = str[i + 1];
 		hex[2] = '\0';
-		buf[i / 2] = strtol(hex, NULL, 16);
+		buf[i / 2] = (uint8_t)strtol(hex, NULL, 16);
 	}
 	return 0;
 }
 
-static inline void
+static __inline void
 StrToGuid(const char *str, GUID *guid)
 {
 	uint32_t status;
@@ -597,7 +937,7 @@ StrToGuid(const char *str, GUID *guid)
 	uuid_from_string(str, (uuid_t *)guid, &status);
 }
 
-static inline void
+static __inline void
 WriteUnaligned64(void *ptr, uint64_t val)
 {
 	memcpy(ptr, &val, sizeof(val));
@@ -610,12 +950,12 @@ WriteUnaligned64(void *ptr, uint64_t val)
  * two %g's in one format, punt. Did I mention this was super lame.
  * Not to mention it's name.... Also, the error GUID is horrific.
  */
-static inline const char *
+static __inline const char *
 guid_str(const GUID *g)
 {
 	static char buf[36 + 1];
 	char *str = NULL;
-	int32_t ignored_status;
+	uint32_t ignored_status;
 
 	uuid_to_string((const uuid_t *)g, &str, &ignored_status);
 	if (str != NULL)
