@@ -1,5 +1,6 @@
 .\" $NetBSD: nvmectl.8,v 1.5 2018/04/18 10:17:54 nonaka Exp $
 .\"
+.\" Copyright (c) 2018 Alexander Motin <mav@FreeBSD.org>
 .\" Copyright (c) 2012 Intel Corporation
 .\" All rights reserved.
 .\"
@@ -32,7 +33,7 @@
 .\"
 .\" Author: Jim Harris <jimharris@FreeBSD.org>
 .\"
-.\" $FreeBSD: head/sbin/nvmecontrol/nvmecontrol.8 314230 2017-02-25 00:09:16Z imp $
+.\" $FreeBSD: head/sbin/nvmecontrol/nvmecontrol.8 330826 2018-03-13 03:02:09Z mav $
 .\"
 .Dd May 19, 2016
 .Dt NVMECTL 8
@@ -72,6 +73,16 @@
 .\".Op Fl f Ar path_to_firmware
 .\".Aq device id
 .Nm
+.Ic format
+.Op Fl f Ar fmt
+.Op Fl m Ar mset
+.Op Fl o Ar pi
+.Op Fl l Ar pil
+.Op Fl E
+.Op Fl C
+.Aq device_id
+.Aq namespace_id
+.Nm
 .Ic power
 .Op Fl l
 .Op Fl p Ar power_state
@@ -102,6 +113,27 @@ will list all valid vendors and pages.
 will print the page as hex.
 .Fl b
 will print the binary data for the page.
+.Ss format
+Format either specified namespace, or all namespaces of specified controller,
+using specified parameters:
+.Ar fmt
+LBA Format,
+.Ar mset
+Metadata Settings,
+.Ar pi
+Protection Information,
+.Ar pil
+Protection Information Location.
+When formatting specific namespace, existing values are used as defaults.
+When formatting all namespaces, all parameters should be specified.
+Some controllers may not support formatting or erasing specific or all
+namespaces.
+Option
+.Fl E
+enables User Data Erase during format.
+Option
+.Fl C
+enables Cryptographic Erase during format.
 .Ss wdc
 The various wdc commands retrieve log data from the wdc/hgst drives.
 The

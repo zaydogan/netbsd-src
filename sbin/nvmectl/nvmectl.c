@@ -173,7 +173,7 @@ read_controller_data(int fd, struct nvm_identify_controller *cdata)
 }
 
 void
-read_namespace_data(int fd, int nsid, struct nvm_identify_namespace *nsdata)
+read_namespace_data(int fd, uint32_t nsid, struct nvm_identify_namespace *nsdata)
 {
 	struct nvme_pt_command	pt;
 
@@ -224,7 +224,7 @@ open_dev(const char *str, int *fd, int show_error, int exit_on_error)
 }
 
 void
-parse_ns_str(const char *ns_str, char *ctrlr_str, int *nsid)
+parse_ns_str(const char *ns_str, char *ctrlr_str, uint32_t *nsid)
 {
 	char	*nsloc;
 

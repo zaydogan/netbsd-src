@@ -76,6 +76,10 @@ struct nvme_function {
 "firmware [-s slot] [-f path_to_firmware] [-a] <controller_id>\n"
 #endif
 
+#define FORMAT_USAGE							       \
+"format [-f fmt] [-m mset] [-p pi] [-l pil] [-E] [-C] "			       \
+"<controller_id|namespace_id>\n"
+
 #define POWER_USAGE							       \
 "power [-l] [-p new-state [-w workload-hint]] <controller_id>\n"
 
@@ -94,15 +98,16 @@ void logpage(int, char *[]) __dead;
 #ifdef FIRMWARE_USAGE
 void firmware(int, char *[]) __dead;
 #endif
+void format(int, char *[]) __dead;
 void power(int, char *[]) __dead;
 void wdc(int, char *[]) __dead;
 
 int open_dev(const char *, int *, int, int);
-void parse_ns_str(const char *, char *, int *);
+void parse_ns_str(const char *, char *, uint32_t *);
 void read_controller_data(int, struct nvm_identify_controller *);
-void read_namespace_data(int, int, struct nvm_identify_namespace *);
+void read_namespace_data(int, uint32_t, struct nvm_identify_namespace *);
 void print_hex(void *, uint32_t);
-void read_logpage(int, uint8_t, int, void *, uint32_t);
+void read_logpage(int, uint8_t, uint32_t, void *, uint32_t);
 __dead void dispatch(int argc, char *argv[], const struct nvme_function *f);
 
 /* Utility Routines */

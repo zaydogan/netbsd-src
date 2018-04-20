@@ -6,6 +6,7 @@ PROG=	nvmectl
 SRCS=	nvmectl.c
 SRCS+=	devlist.c
 SRCS+=	firmware.c
+SRCS+=	format.c
 SRCS+=	identify.c
 SRCS+=	logpage.c
 SRCS+=	perftest.c
