@@ -2931,6 +2931,8 @@
 ./usr/include/sys/domain.h			comp-c-include
 ./usr/include/sys/drvctlio.h			comp-c-include
 ./usr/include/sys/dvdio.h			comp-c-include
+./usr/include/sys/efi.h				comp-c-include
+./usr/include/sys/efiio.h			comp-c-include
 ./usr/include/sys/endian.h			comp-c-include
 ./usr/include/sys/envsys.h			comp-c-include
 ./usr/include/sys/errno.h			comp-c-include
