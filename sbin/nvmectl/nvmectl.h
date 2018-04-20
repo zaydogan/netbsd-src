@@ -65,12 +65,11 @@ struct nvme_function {
 
 #ifdef ENABLE_RESET
 #define RESET_USAGE							       \
-"reset <controller id>\n"
+"reset <controller_id>\n"
 #endif
 
 #define LOGPAGE_USAGE							       \
-"logpage <-p page_id> [-b] [-v vendor] [-x] "				       \
-    "<controller_id|namespace_id>\n"
+"logpage <-p page_id> [-b] [-v vendor] [-x] <controller_id|namespace_id>\n"
 
 #ifdef ENABLE_FIRMWARE
 #define FIRMWARE_USAGE							       \
