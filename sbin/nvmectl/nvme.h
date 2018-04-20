@@ -31,6 +31,12 @@
 #ifndef __NVME_H__
 #define __NVME_H__
 
+/*
+ * Use to mark a command to apply to all namespaces, or to retrieve global
+ *  log pages.
+ */
+#define	NVME_GLOBAL_NAMESPACE_TAG	((uint32_t)0xFFFFFFFF)
+
 /* Cap nvme to 1MB transfers driver explodes with larger sizes */
 #define NVME_MAX_XFER_SIZE		(MAXPHYS < (1<<20) ? MAXPHYS : (1<<20))
 
