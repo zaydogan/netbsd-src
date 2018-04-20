@@ -91,6 +91,7 @@ __KERNEL_RCSID(0, "$NetBSD: bios32.c,v 1.2 2017/08/15 06:37:50 maxv Exp $");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/efi.h>
 
 #include <dev/isa/isareg.h>
 #include <machine/isa_machdep.h>
@@ -98,7 +99,6 @@ __KERNEL_RCSID(0, "$NetBSD: bios32.c,v 1.2 2017/08/15 06:37:50 maxv Exp $");
 #include <machine/segments.h>
 #include <machine/bios32.h>
 #include <x86/smbiosvar.h>
-#include <x86/efi.h>
 
 #include <uvm/uvm.h>
 

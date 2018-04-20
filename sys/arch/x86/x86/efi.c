@@ -33,11 +33,11 @@ __KERNEL_RCSID(0, "$NetBSD: efi.c,v 1.15 2018/05/19 17:18:57 jakllsch Exp $");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/uuid.h>
+#include <sys/efi.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <machine/bootinfo.h>
-#include <x86/efi.h>
 
 #include <dev/mm.h>
 #include <dev/pci/pcivar.h> /* for pci_mapreg_map_enable_decode */
@@ -436,7 +436,7 @@ efi_getbiosmemtype(uint32_t type, uint64_t attr)
 	case EFI_MD_TYPE_FIRMWARE:
 		return BIM_NVS;
 
-	case EFI_MD_TYPE_PMEM:
+	case EFI_MD_TYPE_PERSISTENT:
 		return BIM_PMEM;
 
 	case EFI_MD_TYPE_NULL:

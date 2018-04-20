@@ -35,8 +35,8 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/efi.h>
 
-#include <machine/efi.h>
 #include <machine/vmparam.h>
 #include <machine/md_var.h>
 #include <machine/sal.h>

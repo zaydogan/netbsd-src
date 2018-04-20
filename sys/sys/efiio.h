@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2016 Netflix, Inc.
  * All rights reserved.
@@ -33,14 +35,12 @@
 #include <sys/uuid.h>
 #include <sys/efi.h>
 
-struct efi_get_table_ioc
-{
-	struct uuid uuid;	/* UUID to look up */
+struct efi_get_table_ioc {
+	struct uuid uuid;	/* UUID to lookup */
 	void *ptr;		/* Pointer to table in KVA space */
 };
 
-struct efi_var_ioc
-{
+struct efi_var_ioc {
 	efi_char *name;		/* User pointer to name, in wide chars */
 	size_t namesize;	/* Number of wide characters in name */
 	struct uuid vendor;	/* Vendor's UUID for variable */
@@ -49,11 +49,11 @@ struct efi_var_ioc
 	size_t datasize;	/* Number of *bytes* in the data */
 };
 
-#define EFIIOC_GET_TABLE	_IOWR('E',  1, struct efi_get_table_ioc)
-#define EFIIOC_GET_TIME		_IOR('E',   2, struct efi_tm)
-#define EFIIOC_SET_TIME		_IOW('E',   3, struct efi_tm)
-#define EFIIOC_VAR_GET		_IOWR('E',  4, struct efi_var_ioc)
-#define EFIIOC_VAR_NEXT		_IOWR('E',  5, struct efi_var_ioc)
-#define EFIIOC_VAR_SET		_IOWR('E',  6, struct efi_var_ioc)
+#define	EFIIOC_GET_TABLE	_IOWR('e',  1, struct efi_get_table_ioc)
+#define	EFIIOC_GET_TIME		_IOWR('e',  2, struct efi_tm)
+#define	EFIIOC_SET_TIME		_IOWR('e',  3, struct efi_tm)
+#define	EFIIOC_VAR_GET		_IOWR('e',  4, struct efi_var_ioc)
+#define	EFIIOC_VAR_NEXT		_IOWR('e',  5, struct efi_var_ioc)
+#define	EFIIOC_VAR_SET		_IOWR('e',  6, struct efi_var_ioc)
 
 #endif /* _SYS_EFIIO_H_ */

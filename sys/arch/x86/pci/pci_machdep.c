@@ -84,6 +84,7 @@ __KERNEL_RCSID(0, "$NetBSD: pci_machdep.c,v 1.83 2018/07/10 06:44:49 maxv Exp $"
 #include <sys/bus.h>
 #include <sys/cpu.h>
 #include <sys/kmem.h>
+#include <sys/efi.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -148,10 +149,6 @@ __KERNEL_RCSID(0, "$NetBSD: pci_machdep.c,v 1.83 2018/07/10 06:44:49 maxv Exp $"
 
 #if NCOM > 0
 #include <dev/pci/puccn.h>
-#endif
-
-#ifndef XEN
-#include <x86/efi.h>
 #endif
 
 #include "opt_pci_conf_mode.h"

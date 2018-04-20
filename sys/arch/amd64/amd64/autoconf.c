@@ -78,7 +78,7 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.28 2017/10/22 00:59:28 maya Exp $");
 extern void platform_init(void);
 #endif
 
-#include <x86/efi.h>
+#include <sys/efi.h>
 #include <x86/x86/tsc.h>
 
 /*

@@ -47,6 +47,7 @@ __KERNEL_RCSID(0, "$NetBSD: acpi_machdep.c,v 1.19 2018/03/20 12:14:52 bouyer Exp
 #include <sys/bus.h>
 #include <sys/cpu.h>
 #include <sys/device.h>
+#include <sys/efi.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -64,8 +65,6 @@ __KERNEL_RCSID(0, "$NetBSD: acpi_machdep.c,v 1.19 2018/03/20 12:14:52 bouyer Exp
 #include <machine/i82093reg.h>
 #include <machine/i82093var.h>
 #include <machine/pic.h>
-
-#include <x86/efi.h>
 
 #include <dev/pci/pcivar.h>
 

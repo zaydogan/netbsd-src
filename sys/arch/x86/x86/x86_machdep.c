@@ -53,10 +53,10 @@ __KERNEL_RCSID(0, "$NetBSD: x86_machdep.c,v 1.119 2018/07/13 09:37:32 maxv Exp $
 #include <sys/sysctl.h>
 #include <sys/extent.h>
 #include <sys/rnd.h>
+#include <sys/efi.h>
 
 #include <x86/cpuvar.h>
 #include <x86/cputypes.h>
-#include <x86/efi.h>
 #include <x86/machdep.h>
 #include <x86/nmi.h>
 #include <x86/pio.h>

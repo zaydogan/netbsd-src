@@ -31,9 +31,9 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/lock.h>
+#include <sys/efi.h>
 
 #include <machine/bootinfo.h>
-#include <machine/efi.h>
 #include <machine/sal.h>
 #include <machine/vmparam.h>
 
@@ -69,11 +69,11 @@ efi_boot_minimal(uint64_t systbl)
 		return (EFAULT);
 	}
 	efi_cfgtbl = (efi_systbl->st_cfgtbl == 0) ? NULL :
-	    (struct efi_cfgtbl *)IA64_PHYS_TO_RR7(efi_systbl->st_cfgtbl);
+	    (struct efi_cfgtbl *)IA64_PHYS_TO_RR7((uintptr_t)efi_systbl->st_cfgtbl);
 	if (efi_cfgtbl == NULL)
 		return (ENOENT);
 	efi_runtime = (efi_systbl->st_rt == 0) ? NULL :
-	    (struct efi_rt *)IA64_PHYS_TO_RR7(efi_systbl->st_rt);
+	    (struct efi_rt *)IA64_PHYS_TO_RR7((uintptr_t)efi_systbl->st_rt);
 	if (efi_runtime == NULL)
 		return (ENOENT);
 
@@ -84,11 +84,9 @@ efi_boot_minimal(uint64_t systbl)
 	while (md != NULL) {
 		if (md->md_attr & EFI_MD_ATTR_RT) {
 			if (md->md_attr & EFI_MD_ATTR_WB)
-				md->md_virt =
-				    (void *)IA64_PHYS_TO_RR7(md->md_phys);
+				md->md_virt = IA64_PHYS_TO_RR7(md->md_phys);
 			else if (md->md_attr & EFI_MD_ATTR_UC)
-				md->md_virt =
-				    (void *)IA64_PHYS_TO_RR6(md->md_phys);
+				md->md_virt = IA64_PHYS_TO_RR6(md->md_phys);
 		}
 		md = efi_md_next(md);
 	}
@@ -110,7 +108,7 @@ efi_get_table(struct uuid *uuid)
 	ct = efi_cfgtbl;
 	while (count--) {
 		if (!memcmp(&ct->ct_uuid, uuid, sizeof(*uuid)))
-			return ((void *)IA64_PHYS_TO_RR7(ct->ct_data));
+			return ((void *)IA64_PHYS_TO_RR7((uintptr_t)ct->ct_data));
 		ct++;
 	}
 	return (NULL);

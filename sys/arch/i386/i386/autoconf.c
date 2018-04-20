@@ -90,7 +90,7 @@ extern void platform_init(void);
 #include <dev/pci/pcivar.h>
 #include <i386/pci/pcibios.h>
 #endif
-#include <x86/efi.h>
+#include <sys/efi.h>
 
 /*
  * Determine i/o configuration for a machine.
