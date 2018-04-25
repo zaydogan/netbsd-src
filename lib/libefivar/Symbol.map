@@ -1,0 +1,27 @@
+libefivar.so.0 {
+	global:	efi_append_variable;
+		efi_del_variable;
+		efi_get_next_variable_name;
+		efi_get_variable;
+		efi_get_variable_attributes;
+		efi_get_variable_size;
+		efi_guid_cmp;
+		efi_guid_to_name;
+		efi_guid_to_str;
+		efi_guid_to_symbol;
+		efi_name_to_guid;
+		efi_set_variable;
+		efi_str_to_guid;
+		efi_variables_supported;
+		efidp_format_device_path;
+		efidp_parse_device_path;
+
+		/* FreeBSD */
+		efi_guid_empty;
+		efi_guid_is_zero;
+		efi_known_guid;
+	local: *;
+};
+
+LIBEFIVAR_0.0 {
+} libefivar.so.0;

@@ -25,9 +25,17 @@ SRCS=		efivar.c
 SRCS+=		efichar.c
 SRCS+=		efivar-dp-format.c
 SRCS+=		efivar-dp-parse.c
-#SRCS+=		efivar-dp-xlate.c
+SRCS+=		efivar-dp-xlate.c
 SRCS+=		uefi-dputil.c
 SRCS+=		uefi-guid.c
+SRCS+=		fakegeom.c
+SRCS+=		map.c
+SRCS+=		gpt.c
+SRCS+=		gpt_uuid.c
+SRCS+=		partutil.c
+
+LIBDPLIBS+=	prop	${.CURDIR}/../libprop
+LIBDPLIBS+=	util	${.CURDIR}/../libutil
 
 MAN=		efivar.3
 MLINKS+=	efivar.3 efi_set_variables_supported.3
@@ -55,3 +63,5 @@ CFLAGS+=	-Wno-strict-prototypes
 CFLAGS+=	-Wno-sign-conversion
 CFLAGS+=	-Wno-pointer-sign
 CFLAGS+=	-Wno-unused-but-set-variable
+
+#LDFLAGS+=	-Wl,--version-script,${.CURDIR}/Symbol.map

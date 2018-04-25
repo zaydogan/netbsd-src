@@ -37,7 +37,6 @@ __FBSDID("$FreeBSD: head/lib/libefivar/efivar-dp-xlate.c 330279 2018-03-02 15:12
 #endif
 
 #include <sys/param.h>
-#include <sys/ucred.h>
 #include <sys/mount.h>
 
 #undef MAX
@@ -58,11 +57,18 @@ __FBSDID("$FreeBSD: head/lib/libefivar/efivar-dp-xlate.c 330279 2018-03-02 15:12
 
 #include "uefi-dplib.h"
 
+#ifdef __NetBSD__
+#include <sys/statvfs.h>
+#define statfs		statvfs
+#define getfsstat	getvfsstat
+#define EDOOFUS		EINVAL
+#endif
+
 #define MAX_DP_SANITY	4096		/* Biggest device path in bytes */
 #define MAX_DP_TEXT_LEN	4096		/* Longest string rep of dp */
 
-#define	G_PART	"PART"
-#define	G_LABEL "LABEL"
+#define G_PART	"PART"
+#define G_LABEL	"LABEL"
 #define G_DISK	"DISK"
 
 static const char *
