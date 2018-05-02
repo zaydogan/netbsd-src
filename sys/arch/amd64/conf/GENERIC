@@ -1069,7 +1069,7 @@ vioscsi* at virtio?			# Virtio SCSI device
 
 # Hyper-V devices
 vmbus*		at acpi?		# Hyper-V VMBus
-#hvn*		at vmbus?		# Hyper-V NetVSC
+hvn*		at vmbus?		# Hyper-V NetVSC
 hvs*		at vmbus?		# Hyper-V StorVSC
 hvheartbeat*	at vmbus?		# Hyper-V Heartbeat
 hvshutdown*	at vmbus?		# Hyper-V Shutdown

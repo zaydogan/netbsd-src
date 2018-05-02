@@ -81,6 +81,10 @@ define	hypervvmbus {}
 device	vmbus: hypervvmbus
 file	arch/x86/x86/vmbus.c		vmbus needs-flag
 
+device	hvn: ether, ifnet, arp
+attach	hvn at hypervvmbus
+file	arch/x86/x86/if_hvn.c		hvn
+
 device	hvs: scsi
 attach	hvs at hypervvmbus
 file	arch/x86/x86/hvs.c		hvs
