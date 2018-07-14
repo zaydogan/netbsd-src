@@ -1302,4 +1302,7 @@ SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
 	const_sysctl(clog, "biosextmem", CTLTYPE_INT, biosextmem,
 	    CPU_BIOSEXTMEM);
 #endif
+
+	void sysctl_hypervisor_init(struct sysctllog **);
+	sysctl_hypervisor_init(clog);
 }

@@ -38,6 +38,7 @@ __KERNEL_RCSID(0, "$NetBSD: identcpu.c,v 1.79 2018/07/04 07:55:57 maya Exp $");
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/cpu.h>
+#include <sys/sysctl.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -1153,4 +1154,47 @@ identify_hypervisor(void)
 			}
 		}
 	}
+}
+
+static const char * const vm_guest_name[VM_LAST] = {
+	[VM_GUEST_NO] =		"no",
+	[VM_GUEST_VM] =		"generic",
+	[VM_GUEST_XEN] =	"Xen",
+	[VM_GUEST_HV] =		"Hyper-V",
+	[VM_GUEST_VMWARE] =	"VMware",
+	[VM_GUEST_KVM] =	"KVM",
+};
+
+static int
+sysctl_machdep_hypervisor(SYSCTLFN_ARGS)
+{
+	struct sysctlnode node;
+	const char *t;
+	int error;
+
+	KASSERTMSG(vm_guest >= VM_GUEST_NO && vm_guest < VM_LAST,
+	    "Unknown hypervisor: %d", vm_guest);
+	t = vm_guest_name[vm_guest];
+
+	node = *rnode;
+	node.sysctl_data = &t;
+
+	error = sysctl_lookup(SYSCTLFN_CALL(&node));
+	if (error || newp == NULL)
+		return error;
+
+	return 0;
+}
+
+void sysctl_hypervisor_init(struct sysctllog **);
+void
+sysctl_hypervisor_init(struct sysctllog **clog)
+{
+
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_STRING, "hypervisor",
+		       SYSCTL_DESCR("Type of hypervisor"),
+		       sysctl_machdep_hypervisor, 0, NULL, 0,
+		       CTL_MACHDEP, CTL_CREATE, CTL_EOL);
 }
