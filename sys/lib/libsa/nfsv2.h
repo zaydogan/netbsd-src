@@ -127,7 +127,7 @@ struct nfsv2_time {
 /*
  * File attributes and setable attributes.
  */
-struct nfsv2_fattr {
+struct nfsv2_fattrs {
 	n_long	fa_type;
 	n_long	fa_mode;
 	n_long	fa_nlink;

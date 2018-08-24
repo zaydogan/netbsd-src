@@ -50,25 +50,6 @@
 #include "nfs.h"
 #include "rpc.h"
 
-/* Define our own NFS attributes. */
-struct nfsv2_fattrs {
-	n_long	fa_type;
-	n_long	fa_mode;
-	n_long	fa_nlink;
-	n_long	fa_uid;
-	n_long	fa_gid;
-	n_long	fa_size;
-	n_long	fa_blocksize;
-	n_long	fa_rdev;
-	n_long	fa_blocks;
-	n_long	fa_fsid;
-	n_long	fa_fileid;
-	struct nfsv2_time fa_atime;
-	struct nfsv2_time fa_mtime;
-	struct nfsv2_time fa_ctime;
-};
-
-
 struct nfs_read_args {
 	u_char	fh[NFS_FHSIZE];
 	n_long	off;
