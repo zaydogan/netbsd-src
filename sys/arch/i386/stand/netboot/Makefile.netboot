@@ -34,11 +34,6 @@ CPPFLAGS+= -DSUPPORT_TFTP
 #CFLAGS= -O2 -fomit-frame-pointer -fno-defer-pop
 CFLAGS+= -Wall
 
-# XXX should go into library
-#.PATH: ${.CURDIR}/../../libsa
-#SRCS+= nfs.c
-#CPPFLAGS+= -I${.CURDIR}/../../libsa
-
 #ROM_SIZE= 16384
 ROM_SIZE= 32768
 

@@ -134,7 +134,9 @@ static int nfs_read_size = NFSREAD_MIN_SIZE;
 int	nfs_getrootfh(struct iodesc *, char *, uint32_t *, u_char *);
 int	nfs_lookupfh(struct nfs_iodesc *, const char *, int,
 	    struct nfs_iodesc *);
+#ifndef NFS_NOSYMLINK
 int	nfs_readlink(struct nfs_iodesc *, char *);
+#endif
 ssize_t	nfs_readdata(struct nfs_iodesc *, off_t, void *, size_t);
 
 /*
@@ -461,10 +463,20 @@ nfs_open(const char *path, struct open_file *f)
  	if (debug)
 		printf("nfs_open: %s\n", path);
 #endif
+#ifdef NFS_MOUNT_WHEN_OPEN
+	if (!rootpath[0]) {
+		printf("no rootpath, no nfs\n");
+		return ENXIO;
+	}
+
+	if (nfs_mount(*(int *)(f->f_devdata), rootip, rootpath) == -1)
+		return errno;
+#else
 	if (nfs_root_node.iodesc == NULL) {
 		printf("nfs_open: must mount first.\n");
 		return ENXIO;
 	}
+#endif
 
 	currfd = &nfs_root_node;
 	newfd = 0;
