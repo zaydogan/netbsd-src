@@ -59,40 +59,79 @@
 #include "nfs.h"
 #include "rpc.h"
 
-struct nfs_read_args {
-	u_char	fh[NFS_FHSIZE];
-	n_long	off;
-	n_long	len;
-	n_long	xxx;			/* XXX what's this for? */
+#define NFSREAD_MIN_SIZE	1024
+#define NFSREAD_MAX_SIZE	16384
+
+/* NFSv3 definitions */
+#define NFS_V3MAXFHSIZE		64
+#define NFS_VER3		3
+#define RPCMNT_VER3		3
+#define NFSPROCV3_LOOKUP	3
+#define NFSPROCV3_READLINK	5
+#define NFSPROCV3_READ		6
+#define NFSPROCV3_READDIR	16
+
+typedef struct {
+	uint32_t val[2];
+} n_quad;
+
+struct nfsv3_time {
+	uint32_t nfs_sec;
+	uint32_t nfs_nsec;
 };
 
-/* Data part of nfs rpc reply (also the largest thing we receive) */
-#define NFSREAD_SIZE 1024
-struct nfs_read_repl {
-	n_long	errno;
-	struct	nfsv2_fattrs fa;
-	n_long	count;
-	u_char	data[NFSREAD_SIZE];
+struct nfsv3_fattrs {
+	uint32_t fa_type;
+	uint32_t fa_mode;
+	uint32_t fa_nlink;
+	uint32_t fa_uid;
+	uint32_t fa_gid;
+	n_quad fa_size;
+	n_quad fa_used;
+	n_quad fa_rdev;
+	n_quad fa_fsid;
+	n_quad fa_fileid;
+	struct nfsv3_time fa_atime;
+	struct nfsv3_time fa_mtime;
+	struct nfsv3_time fa_ctime;
 };
 
-#ifndef NFS_NOSYMLINK
-struct nfs_readlnk_repl {
-	n_long	errno;
-	n_long	len;
-	char	path[NFS_MAXPATHLEN];
+/*
+ * For NFSv3, the file handle is variable in size, so most fixed sized
+ * structures for arguments won't work. For most cases, a structure
+ * that starts with any fixed size section is followed by an array
+ * that covers the maximum size required.
+ */
+struct nfsv3_readdir_repl {
+	uint32_t errno;
+	uint32_t ok;
+	struct nfsv3_fattrs fa;
+	uint32_t cookiev0;
+	uint32_t cookiev1;
 };
-#endif
+
+struct nfsv3_readdir_entry {
+	uint32_t follows;
+	uint32_t fid0;
+	uint32_t fid1;
+	uint32_t len;
+	uint32_t nameplus[0];
+};
 
 struct nfs_iodesc {
-	struct	iodesc	*iodesc;
-	off_t	off;
-	u_char	fh[NFS_FHSIZE];
-	struct nfsv2_fattrs fa;	/* all in network order */
+	struct iodesc *iodesc;
+	off_t off;
+	uint32_t fhsize;
+	u_char fh[NFS_V3MAXFHSIZE];
+	struct nfsv3_fattrs fa; /* all in network order */
+	uint64_t cookie;
 };
 
 struct nfs_iodesc nfs_root_node;
 
-int	nfs_getrootfh(struct iodesc *, char *, u_char *);
+static int nfs_read_size = NFSREAD_MIN_SIZE;
+
+int	nfs_getrootfh(struct iodesc *, char *, uint32_t *, u_char *);
 int	nfs_lookupfh(struct nfs_iodesc *, const char *, int,
 	    struct nfs_iodesc *);
 int	nfs_readlink(struct nfs_iodesc *, char *);
@@ -103,23 +142,26 @@ ssize_t	nfs_readdata(struct nfs_iodesc *, off_t, void *, size_t);
  * On error, return non-zero and set errno.
  */
 int
-nfs_getrootfh(struct iodesc *d, char *path, u_char *fhp)
+nfs_getrootfh(struct iodesc *d, char *path, uint32_t *fhlenp, u_char *fhp)
 {
 	int len;
 	struct args {
-		n_long	len;
-		char	path[FNAME_SIZE];
+		uint32_t len;
+		char path[FNAME_SIZE];
 	} *args;
 	struct repl {
-		n_long	errno;
-		u_char	fh[NFS_FHSIZE];
+		uint32_t errno;
+		uint32_t fhsize;
+		u_char fh[NFS_V3MAXFHSIZE];
+		uint32_t authcnt;
+		uint32_t auth[7];
 	} *repl;
 	struct {
-		n_long	h[RPC_HEADER_WORDS];
+		uint32_t h[RPC_HEADER_WORDS];
 		struct args d;
 	} sdata;
 	struct {
-		n_long	h[RPC_HEADER_WORDS];
+		uint32_t h[RPC_HEADER_WORDS];
 		struct repl d;
 	} rdata;
 	ssize_t cc;
@@ -138,15 +180,15 @@ nfs_getrootfh(struct iodesc *d, char *path, u_char *fhp)
 		len = sizeof(args->path);
 	args->len = htonl(len);
 	(void)memcpy(args->path, path, len);
-	len = 4 + roundup(len, 4);
+	len = sizeof(uint32_t) + roundup(len, sizeof(uint32_t));
 
-	cc = rpc_call(d, RPCPROG_MNT, RPCMNT_VER1, RPCMNT_MOUNT,
+	cc = rpc_call(d, RPCPROG_MNT, RPCMNT_VER3, RPCMNT_MOUNT,
 	    args, len, repl, sizeof(*repl));
 	if (cc == -1) {
 		/* errno was set by rpc_call */
 		return -1;
 	}
-	if (cc < 4) {
+	if (cc < 2 * sizeof(uint32_t)) {
 		errno = EBADRPC;
 		return -1;
 	}
@@ -154,7 +196,8 @@ nfs_getrootfh(struct iodesc *d, char *path, u_char *fhp)
 		errno = ntohl(repl->errno);
 		return -1;
 	}
-	(void)memcpy(fhp, repl->fh, sizeof(repl->fh));
+	*fhlenp = ntohl(repl->fhsize);
+	(void)memcpy(fhp, repl->fh, *fhlenp);
 	return 0;
 }
 
@@ -166,23 +209,25 @@ int
 nfs_lookupfh(struct nfs_iodesc *d, const char *name, int len,
 	struct nfs_iodesc *newfd)
 {
-	int rlen;
+	int pos;
 	struct args {
-		u_char	fh[NFS_FHSIZE];
-		n_long	len;
-		char	name[FNAME_SIZE];
+		uint32_t fhsize;
+		uint32_t fhplusname[1 +
+		    (NFS_V3MAXFHSIZE + FNAME_SIZE) / sizeof(uint32_t)];
 	} *args;
 	struct repl {
-		n_long	errno;
-		u_char	fh[NFS_FHSIZE];
-		struct	nfsv2_fattrs fa;
+		uint32_t errno;
+		uint32_t fhsize;
+		uint32_t fhplusattr[(NFS_V3MAXFHSIZE +
+		    2 * (sizeof(uint32_t) +
+		    sizeof(struct nfsv3_fattrs))) / sizeof(uint32_t)];
 	} *repl;
 	struct {
-		n_long	h[RPC_HEADER_WORDS];
+		uint32_t h[RPC_HEADER_WORDS];
 		struct args d;
 	} sdata;
 	struct {
-		n_long	h[RPC_HEADER_WORDS];
+		uint32_t h[RPC_HEADER_WORDS];
 		struct repl d;
 	} rdata;
 	ssize_t cc;
@@ -196,28 +241,32 @@ nfs_lookupfh(struct nfs_iodesc *d, const char *name, int len,
 	repl = &rdata.d;
 
 	(void)memset(args, 0, sizeof(*args));
-	(void)memcpy(args->fh, d->fh, sizeof(args->fh));
-	if ((size_t)len > sizeof(args->name))
-		len = sizeof(args->name);
-	(void)memcpy(args->name, name, len);
-	args->len = htonl(len);
-	len = 4 + roundup(len, 4);
-	len += NFS_FHSIZE;
+	args->fhsize = htonl(d->fhsize);
+	(void)memcpy(args->fhplusname, d->fh, d->fhsize);
+	if (len > FNAME_SIZE)
+		len = FNAME_SIZE;
+	pos = roundup(d->fhsize, sizeof(uint32_t)) / sizeof(uint32_t);
+	args->fhplusname[pos++] = htonl(len);
+	(void)memcpy(&args->fhplusname[pos], name, len);
+	len = sizeof(uint32_t) + pos * sizeof(uint32_t) +
+	    roundup(len, sizeof(uint32_t));
 
-	rlen = sizeof(*repl);
-
-	cc = rpc_call(d->iodesc, NFS_PROG, NFS_VER2, NFSPROC_LOOKUP,
-	    args, len, repl, rlen);
+	cc = rpc_call(d->iodesc, NFS_PROG, NFS_VER3, NFSPROCV3_LOOKUP,
+	    args, len, repl, sizeof(*repl));
 	if (cc == -1)
 		return errno;		/* XXX - from rpc_call */
-	if (cc < 4)
+	if (cc < 2 * sizeof(uint32_t))
 		return EIO;
 	if (repl->errno) {
 		/* saerrno.h now matches NFS error numbers. */
 		return ntohl(repl->errno);
 	}
-	(void)memcpy(&newfd->fh, repl->fh, sizeof(newfd->fh));
-	(void)memcpy(&newfd->fa, &repl->fa, sizeof(newfd->fa));
+	newfd->fhsize = ntohl(repl->fhsize);
+	(void)memcpy(&newfd->fh, repl->fhplusattr, newfd->fhsize);
+	pos = roundup(newfd->fhsize, sizeof(uint32_t)) / sizeof(uint32_t);
+	if (repl->fhplusattr[pos++] == 0)
+		return EIO;
+	(void)memcpy(&newfd->fa, &repl->fhplusattr[pos], sizeof(newfd->fa));
 	return 0;
 }
 
@@ -228,13 +277,24 @@ nfs_lookupfh(struct nfs_iodesc *d, const char *name, int len,
 int
 nfs_readlink(struct nfs_iodesc *d, char *buf)
 {
+	struct args {
+		uint32_t fhsize;
+		u_char fh[NFS_V3MAXFHSIZE];
+	} *args;
+	struct repl {
+		uint32_t errno;
+		uint32_t ok;
+		struct nfsv3_fattrs fa;
+		uint32_t len;
+		u_char path[NFS_MAXPATHLEN];
+	} *repl;
 	struct {
-		n_long	h[RPC_HEADER_WORDS];
-		u_char fh[NFS_FHSIZE];
+		uint32_t h[RPC_HEADER_WORDS];
+		struct args d;
 	} sdata;
 	struct {
-		n_long	h[RPC_HEADER_WORDS];
-		struct nfs_readlnk_repl d;
+		uint32_t h[RPC_HEADER_WORDS];
+		struct repl d;
 	} rdata;
 	ssize_t cc;
 
@@ -243,25 +303,33 @@ nfs_readlink(struct nfs_iodesc *d, char *buf)
 		printf("readlink: called\n");
 #endif
 
-	(void)memcpy(sdata.fh, d->fh, NFS_FHSIZE);
-	cc = rpc_call(d->iodesc, NFS_PROG, NFS_VER2, NFSPROC_READLINK,
-	              sdata.fh, NFS_FHSIZE,
-	              &rdata.d, sizeof(rdata.d));
+	args = &sdata.d;
+	repl = &rdata.d;
+
+	(void)memset(args, 0, sizeof(*args));
+	args->fhsize = htonl(d->fhsize);
+	(void)memcpy(args->fh, d->fh, d->fhsize);
+	cc = rpc_call(d->iodesc, NFS_PROG, NFS_VER3, NFSPROCV3_READLINK,
+	    args, sizeof(uint32_t) + roundup(d->fhsize, sizeof(uint32_t)),
+	    repl, sizeof(*repl));
 	if (cc == -1)
 		return errno;
 
-	if (cc < 4)
+	if (cc < 2 * sizeof(uint32_t))
 		return EIO;
 
-	if (rdata.d.errno)
-		return ntohl(rdata.d.errno);
+	if (repl->errno)
+		return ntohl(repl->errno);
 
-	rdata.d.len = ntohl(rdata.d.len);
-	if (rdata.d.len > NFS_MAXPATHLEN)
+	if (!repl->ok)
+		return EIO;
+
+	repl->len = ntohl(repl->len);
+	if (repl->len > NFS_MAXPATHLEN)
 		return ENAMETOOLONG;
 
-	(void)memcpy(buf, rdata.d.path, rdata.d.len);
-	buf[rdata.d.len] = 0;
+	(void)memcpy(buf, repl->path, repl->len);
+	buf[repl->len] = 0;
 	return 0;
 }
 #endif
@@ -273,33 +341,47 @@ nfs_readlink(struct nfs_iodesc *d, char *buf)
 ssize_t
 nfs_readdata(struct nfs_iodesc *d, off_t off, void *addr, size_t len)
 {
-	struct nfs_read_args *args;
-	struct nfs_read_repl *repl;
+	struct args {
+		uint32_t fhsize;
+		uint32_t fhoffcnt[NFS_V3MAXFHSIZE / sizeof(uint32_t) + 3];
+	} *args;
+	struct repl {
+		uint32_t errno;
+		uint32_t ok;
+		struct nfsv3_fattrs fa;
+		uint32_t count;
+		uint32_t eof;
+		uint32_t len;
+		u_char data[NFSREAD_MAX_SIZE];
+	} *repl;
 	struct {
-		n_long	h[RPC_HEADER_WORDS];
-		struct nfs_read_args d;
+		uint32_t h[RPC_HEADER_WORDS];
+		struct args d;
 	} sdata;
 	struct {
-		n_long	h[RPC_HEADER_WORDS];
-		struct nfs_read_repl d;
+		uint32_t h[RPC_HEADER_WORDS];
+		struct repl d;
 	} rdata;
 	ssize_t cc;
 	long x;
-	size_t hlen, rlen;
+	size_t hlen, rlen, pos;
 
 	args = &sdata.d;
 	repl = &rdata.d;
 
-	(void)memcpy(args->fh, d->fh, NFS_FHSIZE);
-	args->off = htonl((n_long)off);
-	if (len > NFSREAD_SIZE)
-		len = NFSREAD_SIZE;
-	args->len = htonl((n_long)len);
-	args->xxx = htonl((n_long)0);
-	hlen = sizeof(*repl) - NFSREAD_SIZE;
+	(void)memset(args, 0, sizeof(*args));
+	args->fhsize = htonl(d->fhsize);
+	(void)memcpy(args->fhoffcnt, d->fh, d->fhsize);
+	pos = roundup(d->fhsize, sizeof(uint32_t)) / sizeof(uint32_t);
+	args->fhoffcnt[pos++] = 0;
+	args->fhoffcnt[pos++] = htonl((uint32_t)off);
+	if (len > nfs_read_size)
+		len = nfs_read_size;
+	args->fhoffcnt[pos] = htonl((uint32_t)len);
+	hlen = offsetof(struct repl, data[0]);
 
-	cc = rpc_call(d->iodesc, NFS_PROG, NFS_VER2, NFSPROC_READ,
-	    args, sizeof(*args),
+	cc = rpc_call(d->iodesc, NFS_PROG, NFS_VER3, NFSPROCV3_READ,
+	    args, 4 * sizeof(uint32_t) + roundup(d->fhsize, sizeof(uint32_t)),
 	    repl, sizeof(*repl));
 	if (cc == -1) {
 		/* errno was already set by rpc_call */
@@ -332,7 +414,6 @@ int
 nfs_mount(int sock, struct in_addr ip, char *path)
 {
 	struct iodesc *desc;
-	struct nfsv2_fattrs *fa;
 
 	if (!(desc = socktodesc(sock))) {
 		errno = EINVAL;
@@ -342,14 +423,13 @@ nfs_mount(int sock, struct in_addr ip, char *path)
 	/* Bind to a reserved port. */
 	desc->myport = htons(--rpc_port);
 	desc->destip = ip;
-	if (nfs_getrootfh(desc, path, nfs_root_node.fh))
+	if (nfs_getrootfh(desc, path, &nfs_root_node.fhsize, nfs_root_node.fh))
 		return -1;
 	nfs_root_node.iodesc = desc;
 	/* Fake up attributes for the root dir. */
-	fa = &nfs_root_node.fa;
-	fa->fa_type  = htonl(NFDIR);
-	fa->fa_mode  = htonl(0755);
-	fa->fa_nlink = htonl(2);
+	nfs_root_node.fa.fa_type = htonl(NFDIR);
+	nfs_root_node.fa.fa_mode = htonl(0755);
+	nfs_root_node.fa.fa_nlink = htonl(2);
 
 #ifdef NFS_DEBUG
 	if (debug)
@@ -595,7 +675,7 @@ __compactcall off_t
 nfs_seek(struct open_file *f, off_t offset, int where)
 {
 	struct nfs_iodesc *d = (struct nfs_iodesc *)f->f_fsdata;
-	n_long size = ntohl(d->fa.fa_size);
+	uint32_t size = ntohl(d->fa.fa_size.val[1]);
 
 	switch (where) {
 	case SEEK_SET:
@@ -614,15 +694,15 @@ nfs_seek(struct open_file *f, off_t offset, int where)
 	return d->off;
 }
 
-/* NFNON=0, NFREG=1, NFDIR=2, NFBLK=3, NFCHR=4, NFLNK=5 */
-const int nfs_stat_types[8] = {
-	0, S_IFREG, S_IFDIR, S_IFBLK, S_IFCHR, S_IFLNK, 0 };
+/* NFNON=0, NFREG=1, NFDIR=2, NFBLK=3, NFCHR=4, NFLNK=5, NFSOCK=6, NFFIFO=7 */
+const int nfs_stat_types[9] = {
+	0, S_IFREG, S_IFDIR, S_IFBLK, S_IFCHR, S_IFLNK, S_IFSOCK, S_IFIFO, 0 };
 
 __compactcall int
 nfs_stat(struct open_file *f, struct stat *sb)
 {
 	struct nfs_iodesc *fp = (struct nfs_iodesc *)f->f_fsdata;
-	n_long ftype, mode;
+	uint32_t ftype, mode;
 
 	ftype = ntohl(fp->fa.fa_type);
 	mode  = ntohl(fp->fa.fa_mode);
@@ -632,7 +712,7 @@ nfs_stat(struct open_file *f, struct stat *sb)
 	sb->st_nlink = ntohl(fp->fa.fa_nlink);
 	sb->st_uid   = ntohl(fp->fa.fa_uid);
 	sb->st_gid   = ntohl(fp->fa.fa_gid);
-	sb->st_size  = ntohl(fp->fa.fa_size);
+	sb->st_size  = ntohl(fp->fa.fa_size.val[1]);
 
 	return 0;
 }
