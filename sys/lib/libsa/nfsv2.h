@@ -115,7 +115,9 @@ typedef enum {
 	NFDIR=2,
 	NFBLK=3,
 	NFCHR=4,
-	NFLNK=5
+	NFLNK=5,
+	NFSOCK=6,
+	NFFIFO=7
 } nfstype;
 
 /* Structs for common parts of the rpc's */
