@@ -60,7 +60,7 @@
 #include "rpc.h"
 
 #if !defined(NFS_V3_ONLY) && !defined(NFS_V2_V3)
-#define NFS_V2_ONLY
+#define NFS_V3_ONLY
 #endif
 
 #define NFSREAD_MIN_SIZE	1024
